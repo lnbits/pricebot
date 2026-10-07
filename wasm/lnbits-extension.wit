@@ -1,0 +1,70 @@
+package lnbits:extension;
+
+interface host {
+  record storage-get-request { table: string, id: string }
+  record storage-get-response { data-json: option<string> }
+  record storage-set-request { table: string, data-json: string }
+  record storage-set-response { ok: bool }
+  record storage-paginated-request {
+    table: string, filters-json: string, search: string, search-fields: list<string>,
+    sort-by: string, descending: bool, limit: u32, offset: u32
+  }
+  record storage-paginated-response { rows-json: string, total: u64 }
+  record storage-delete-response { ok: bool }
+  record random-id-request { prefix: string }
+  record random-id-response { id: string }
+  record now-response { timestamp: u64 }
+  record notification-request { %type: string, message: string }
+  record notification-response { queued: bool }
+  storage-get: func(request: storage-get-request) -> storage-get-response;
+  storage-set: func(request: storage-set-request) -> storage-set-response;
+  storage-get-paginated: func(request: storage-paginated-request) -> storage-paginated-response;
+  storage-delete: func(request: storage-get-request) -> storage-delete-response;
+  random-id: func(request: random-id-request) -> random-id-response;
+  now: func() -> now-response;
+  notifications-send-user-notification: func(request: notification-request) -> notification-response;
+}
+
+interface storage-shared {
+  use host.{storage-get-request, storage-get-response, storage-set-request,
+    storage-set-response, storage-paginated-request, storage-paginated-response,
+    storage-delete-response};
+  get: func(request: storage-get-request) -> storage-get-response;
+  set: func(request: storage-set-request) -> storage-set-response;
+  get-paginated: func(request: storage-paginated-request) -> storage-paginated-response;
+  %delete: func(request: storage-get-request) -> storage-delete-response;
+}
+
+interface utils-currencies {
+  record rate-request { currency: string }
+  record rate-response { rate: f64, price: f64 }
+  rate: func(request: rate-request) -> rate-response;
+}
+
+interface scheduler {
+  record set-request {
+    id: option<string>, handler: string, cron-expression: string,
+    timezone: string, payload-json: string, enabled: bool, scope: string
+  }
+  record set-response { schedule-json: string }
+  record list-request { scope: string, limit: u32, offset: u32 }
+  record list-response { schedules-json: string }
+  set-schedule: func(request: set-request) -> set-response;
+  list-schedules: func(request: list-request) -> list-response;
+}
+
+world pricebot {
+  import host;
+  import storage-shared;
+  import scheduler;
+  import utils-currencies;
+  export get-state: func(request-json: string) -> string;
+  export setup-shared: func(request-json: string) -> string;
+  export save-preferences: func(request-json: string) -> string;
+  export save-alert: func(request-json: string) -> string;
+  export delete-alert: func(request-json: string) -> string;
+  export collect-prices: func(request-json: string) -> string;
+  export prune-history: func(request-json: string) -> string;
+  export check-alerts: func(request-json: string) -> string;
+  export daily-summary: func(request-json: string) -> string;
+}

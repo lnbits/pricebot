@@ -1,0 +1,169 @@
+{
+  "id": "pricebot",
+  "name": "Pricebot",
+  "short_description": "Bitcoin price alerts and a daily summary, powered by LNbits.",
+  "version": "0.1.0",
+  "min_lnbits_version": "1.5.6",
+  "extension_type": "wasm",
+  "tile": "/ext-assets/pricebot/icon.svg",
+  "wasm": {
+    "module": "wasm/module.wasm",
+    "exports": [
+      {
+        "name": "get-state",
+        "visibility": "authenticated"
+      },
+      {
+        "name": "setup-shared",
+        "visibility": "authenticated"
+      },
+      {
+        "name": "save-preferences",
+        "visibility": "authenticated"
+      },
+      {
+        "name": "save-alert",
+        "visibility": "authenticated"
+      },
+      {
+        "name": "delete-alert",
+        "visibility": "authenticated"
+      },
+      {
+        "name": "collect-prices",
+        "visibility": "event"
+      },
+      {
+        "name": "prune-history",
+        "visibility": "event"
+      },
+      {
+        "name": "check-alerts",
+        "visibility": "event"
+      },
+      {
+        "name": "daily-summary",
+        "visibility": "event"
+      }
+    ]
+  },
+  "ui_routes": [
+    {
+      "path": "/pricebot",
+      "entrypoint": "ui/index.html",
+      "auth": "user"
+    }
+  ],
+  "api_routes": [
+    {
+      "method": "GET",
+      "path": "/state",
+      "export": "get-state",
+      "auth": "user"
+    },
+    {
+      "method": "POST",
+      "path": "/setup",
+      "export": "setup-shared",
+      "auth": "user"
+    },
+    {
+      "method": "PUT",
+      "path": "/preferences",
+      "export": "save-preferences",
+      "auth": "user"
+    },
+    {
+      "method": "POST",
+      "path": "/alerts",
+      "export": "save-alert",
+      "auth": "user"
+    },
+    {
+      "method": "PUT",
+      "path": "/alerts/{alert_id}",
+      "export": "save-alert",
+      "auth": "user",
+      "path_params": {
+        "alert_id": "alertId"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/alerts/{alert_id}",
+      "export": "delete-alert",
+      "auth": "user",
+      "path_params": {
+        "alert_id": "alertId"
+      }
+    }
+  ],
+  "permissions": [
+    {
+      "id": "utils.basic",
+      "description": "Read the BTC/USD price from core exchange rates."
+    },
+    {
+      "id": "ext.storage.read",
+      "description": "Read your Pricebot alerts, settings, and notification state."
+    },
+    {
+      "id": "ext.storage.write",
+      "description": "Save your Pricebot alerts, settings, and notification state."
+    },
+    {
+      "id": "ext.storage.read_shared",
+      "description": "Read the shared BTC/USD price history.",
+      "policies": [
+        {
+          "table": "prices"
+        }
+      ]
+    },
+    {
+      "id": "ext.storage.write_shared",
+      "description": "Collect and prune shared price history from administrator requests or shared scheduled jobs.",
+      "policies": [
+        {
+          "table": "prices"
+        }
+      ]
+    },
+    {
+      "id": "notifications.send_user_notification",
+      "description": "Send price alerts and optional daily summaries through your saved LNbits notification settings."
+    },
+    {
+      "id": "scheduler.extension",
+      "description": "Collect BTC prices every minute and prune history daily at 00:05 UTC.",
+      "policies": [
+        {
+          "handler": "collect-prices",
+          "cron_expression": "* * * * *",
+          "timezone": "UTC"
+        },
+        {
+          "handler": "prune-history",
+          "cron_expression": "5 0 * * *",
+          "timezone": "UTC"
+        }
+      ]
+    },
+    {
+      "id": "scheduler.user",
+      "description": "Check your alerts every minute and optionally send a daily summary at 09:00 UTC.",
+      "policies": [
+        {
+          "handler": "check-alerts",
+          "cron_expression": "* * * * *",
+          "timezone": "UTC"
+        },
+        {
+          "handler": "daily-summary",
+          "cron_expression": "0 9 * * *",
+          "timezone": "UTC"
+        }
+      ]
+    }
+  ]
+}

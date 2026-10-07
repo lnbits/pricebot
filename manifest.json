@@ -1,0 +1,9 @@
+{
+  "repos": [
+    {
+      "id": "pricebot",
+      "organisation": "lnbits",
+      "repository": "pricebot"
+    }
+  ]
+}

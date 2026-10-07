@@ -1,0 +1,93 @@
+[v-cloak] {
+  display: none;
+}
+body {
+  background: #12151b;
+  color: #ebedf2;
+  margin: 0;
+  font-family: system-ui, sans-serif;
+}
+main {
+  max-width: 1120px;
+  margin: auto;
+  padding: 36px 24px;
+}
+h1 {
+  font-size: 28px;
+  line-height: 1.2;
+  letter-spacing: -1px;
+  margin: 0 0 4px;
+  font-weight: 700;
+}
+h2 {
+  font-size: 19px;
+  line-height: 1.4;
+  margin: 0;
+  font-weight: 600;
+}
+.muted {
+  color: #a3acbc;
+}
+.price-card {
+  padding: 30px;
+  border: 1px solid #484032;
+  border-radius: 20px;
+  background: linear-gradient(125deg, #28231b, #1b202b 70%);
+}
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: #e6bb79;
+}
+.price {
+  font-size: clamp(38px, 6vw, 64px);
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -2px;
+  font-variant-numeric: tabular-nums;
+}
+.panel {
+  background: #1b2029;
+  border: 1px solid #303745;
+  border-radius: 16px;
+  padding: 24px;
+}
+.admin-panel {
+  padding: 8px 12px 16px;
+}
+.alert-row {
+  padding: 18px 0;
+  border-bottom: 1px solid #333b47;
+}
+.alert-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.alert-dialog {
+  width: 460px;
+  max-width: 95vw;
+  background: #1b2029;
+  border-radius: 16px;
+}
+.positive {
+  color: #7ddbb0;
+}
+.negative {
+  color: #ffa7a7;
+}
+.notice.error {
+  background: #42272b;
+}
+.notice.success {
+  background: #213d33;
+}
+@media (max-width: 600px) {
+  main {
+    padding: 22px 14px;
+  }
+  .panel,
+  .price-card {
+    padding: 20px;
+  }
+}

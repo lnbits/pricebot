@@ -1,0 +1,80 @@
+{
+  "operations": [
+    {
+      "op": "create_table",
+      "table": "prices",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "hour",
+          "type": "integer"
+        },
+        {
+          "name": "samples_json",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "op": "create_table",
+      "table": "preferences",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "channel",
+          "type": "string"
+        },
+        {
+          "name": "daily_summary",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "op": "create_table",
+      "table": "alerts",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "amount_usd",
+          "type": "number"
+        },
+        {
+          "name": "window_minutes",
+          "type": "integer"
+        },
+        {
+          "name": "enabled",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "op": "create_table",
+      "table": "state",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "value_json",
+          "type": "string"
+        }
+      ]
+    }
+  ]
+}
