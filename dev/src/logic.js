@@ -4,15 +4,14 @@ const DAY = 86400
 const HISTORY_SECONDS = 2 * DAY
 const MAX_ALERTS = 50
 const JOBS = {
-  'collect-prices': {scope: 'extension', cronExpression: '* * * * *'},
-  'prune-history': {scope: 'extension', cronExpression: '5 0 * * *'},
+  'collect-prices': {scope: 'user', cronExpression: '* * * * *'},
+  'prune-history': {scope: 'user', cronExpression: '5 0 * * *'},
   'check-alerts': {scope: 'user', cronExpression: '* * * * *'},
   'daily-summary': {scope: 'user', cronExpression: '0 9 * * *'}
 }
 
 export function createPricebot({
   storage,
-  shared,
   scheduler,
   currencies,
   notifications,
@@ -44,7 +43,7 @@ export function createPricebot({
 
   function samples() {
     const observedBefore = system.now()
-    return shared
+    return storage
       .list('prices', {limit: 1000, sortBy: 'hour', descending: true})
       .data.flatMap(row => JSON.parse(row.samples_json))
       .filter(
@@ -121,7 +120,7 @@ export function createPricebot({
       }
     },
 
-    setupShared() {
+    setupJobs() {
       return {
         jobs: [ensureJob('collect-prices'), ensureJob('prune-history')]
       }
@@ -131,6 +130,8 @@ export function createPricebot({
       if (!['email', 'nostr', 'telegram'].includes(request.channel)) {
         throw new Error('Choose email, Nostr, or Telegram.')
       }
+      ensureJob('collect-prices')
+      ensureJob('prune-history')
       const check = ensureJob('check-alerts')
       const daily = request.dailySummary === true
       ensureJob('daily-summary', daily)
@@ -175,15 +176,16 @@ export function createPricebot({
         throw new Error('Core returned an invalid BTC price.')
       const timestamp = Math.floor(system.now() / MINUTE) * MINUTE
       const hour = Math.floor(timestamp / HOUR) * HOUR
-      const id = `hour:${hour}`
-      const existing = shared.get('prices', id)
+      const existing = storage.list('prices', {filters: {hour}, limit: 1}).data[0]
+      // IDs are table-wide even though reads and writes are owner-scoped.
+      const id = existing?.id || system.id('price')
       const entries = existing ? JSON.parse(existing.samples_json) : []
       // Recovered/repeated invocations keep the original observation for a minute.
       if (entries.some(sample => sample[0] === timestamp))
         return {collected: false}
       entries.push([timestamp, price])
       entries.sort((a, b) => a[0] - b[0])
-      shared.set('prices', {id, hour, samples_json: JSON.stringify(entries)})
+      storage.set('prices', {id, hour, samples_json: JSON.stringify(entries)})
       return {collected: true, price, timestamp}
     },
 
@@ -192,7 +194,7 @@ export function createPricebot({
       let deleted = 0
       // Read oldest-first and repeat page zero after deletion, avoiding skipped rows.
       while (true) {
-        const page = shared.list('prices', {limit: 100, sortBy: 'hour'}).data
+        const page = storage.list('prices', {limit: 100, sortBy: 'hour'}).data
         let removed = 0
         for (const row of page) {
           if (row.hour >= cutoff) break
@@ -200,11 +202,11 @@ export function createPricebot({
             sample => sample[0] >= cutoff
           )
           if (!entries.length) {
-            shared.delete('prices', row.id)
+            storage.delete('prices', row.id)
             removed++
             deleted++
           } else {
-            shared.set('prices', {
+            storage.set('prices', {
               ...row,
               samples_json: JSON.stringify(entries)
             })

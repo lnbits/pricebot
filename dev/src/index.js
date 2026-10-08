@@ -7,12 +7,6 @@ import {
   now,
   notificationsSendUserNotification
 } from 'lnbits:extension/host'
-import {
-  get,
-  set,
-  getPaginated,
-  delete as deleteShared
-} from 'lnbits:extension/storage-shared'
 import {setSchedule, listSchedules} from 'lnbits:extension/scheduler'
 import {rate} from 'lnbits:extension/utils-currencies'
 import {createPricebot} from './logic.js'
@@ -29,7 +23,7 @@ function storageAdapter(read, write, list, remove) {
     list(table, options = {}) {
       const page = list({
         table,
-        filtersJson: '{}',
+        filtersJson: JSON.stringify(options.filters || {}),
         search: '',
         searchFields: [],
         sortBy: options.sortBy || '',
@@ -52,7 +46,6 @@ const bot = createPricebot({
     storageGetPaginated,
     storageDelete
   ),
-  shared: storageAdapter(get, set, getPaginated, deleteShared),
   scheduler: {
     list(scope) {
       return JSON.parse(
@@ -104,8 +97,8 @@ function interactive(method, value) {
 export function getState(value) {
   return interactive('getState', value)
 }
-export function setupShared(value) {
-  return interactive('setupShared', value)
+export function setupJobs(value) {
+  return interactive('setupJobs', value)
 }
 export function savePreferences(value) {
   return interactive('savePreferences', value)

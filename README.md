@@ -2,8 +2,7 @@
 
 A WASM LNbits extension for BTC/USD price alerts and optional daily summaries.
 Prices come from LNbits core and use its configured providers and exchange-rate
-cache. Users share one price history; their alert settings and notification state
-remain private.
+cache. Each user has private price history, alert settings, and notification state.
 
 ## Scheduled jobs
 
@@ -12,18 +11,20 @@ extension does not start jobs automatically.
 
 | Handler          | Scope              | Cron        | Timezone |
 | ---------------- | ------------------ | ----------- | -------- |
-| `collect-prices` | Shared             | `* * * * *` | UTC      |
-| `prune-history`  | Shared             | `5 0 * * *` | UTC      |
+| `collect-prices` | Per user           | `* * * * *` | UTC      |
+| `prune-history`  | Per user           | `5 0 * * *` | UTC      |
 | `check-alerts`   | Per user           | `* * * * *` | UTC      |
 | `daily-summary`  | Per user, optional | `0 9 * * *` | UTC      |
 
-An administrator opens **Instance administration → Start / resume shared jobs**
-once to start collection. Saving notification settings creates the user's two
-jobs; the summary job is paused unless enabled. Each handler has only one job per
-owner. Repeated setup and settings changes reuse those jobs.
+Saving notification settings creates all four jobs for that user; the summary
+job is paused unless enabled. **Your price collection → Start / resume price
+collection** can also start collection and pruning before notification settings
+are saved. Each handler has only one job per owner. Repeated setup and settings
+changes reuse those jobs. Each user's history starts when their collector runs;
+alert windows and daily summaries wait until enough history is available.
 
 Disabling Pricebot for a user stops that user's scheduled work through core's
-access checks. Other users and shared jobs continue. Re-enabling resumes eligible
+access checks. Other users' jobs continue. Re-enabling resumes eligible
 jobs; a manually paused schedule stays paused until explicitly enabled.
 
 ## Alerts and history
@@ -55,11 +56,11 @@ a process failure between queuing and saving state can cause a repeated alert.
 ## Core requirements
 
 This extension requires the core WASM scheduler with administrator-approved
-handler policies and one schedule ID per handler/owner, plus the
-`storage.shared.get`, `storage.shared.set`, `storage.shared.get_paginated`, and
-`storage.shared.delete` host methods. Shared storage grants are restricted to the
-`prices` table. Only an administrator or a shared scheduled callback may write it;
-user invocations may read it. No external HTTP permission is required.
+handler policies and one schedule ID per handler/owner, plus the owner-scoped
+`storage.get`, `storage.set`, `storage.get_paginated`, and `storage.delete` host
+methods. All jobs use `scheduler.user`, so scheduled storage operations run as
+the owning user. Price records use generated IDs because row IDs are unique
+across the whole table. No shared-storage or external HTTP permission is required.
 
 The extension's storage migration creates its own `prices`, `preferences`,
 `alerts`, and `state` tables. It does not add core database tables.
@@ -76,7 +77,7 @@ make build
 ```
 
 `make check` runs JavaScript syntax checks and unit tests for alerts, summaries,
-job reuse, stale/missing data, notification failures, and retention.
+job reuse, user isolation, stale/missing data, notification failures, and retention.
 `make build` bundles the two source modules and compiles `wasm/module.wasm`.
 
 Install through LNbits' extension installation flow to apply storage migrations

@@ -14,7 +14,7 @@
         "visibility": "authenticated"
       },
       {
-        "name": "setup-shared",
+        "name": "setup-jobs",
         "visibility": "authenticated"
       },
       {
@@ -64,7 +64,7 @@
     {
       "method": "POST",
       "path": "/setup",
-      "export": "setup-shared",
+      "export": "setup-jobs",
       "auth": "user"
     },
     {
@@ -105,37 +105,19 @@
     },
     {
       "id": "ext.storage.read",
-      "description": "Read your Pricebot alerts, settings, and notification state."
+      "description": "Read your Pricebot price history, alerts, settings, and notification state."
     },
     {
       "id": "ext.storage.write",
-      "description": "Save your Pricebot alerts, settings, and notification state."
-    },
-    {
-      "id": "ext.storage.read_shared",
-      "description": "Read the shared BTC/USD price history.",
-      "policies": [
-        {
-          "table": "prices"
-        }
-      ]
-    },
-    {
-      "id": "ext.storage.write_shared",
-      "description": "Collect and prune shared price history from administrator requests or shared scheduled jobs.",
-      "policies": [
-        {
-          "table": "prices"
-        }
-      ]
+      "description": "Save your Pricebot price history, alerts, settings, and notification state."
     },
     {
       "id": "notifications.send_user_notification",
       "description": "Send price alerts and optional daily summaries through your saved LNbits notification settings."
     },
     {
-      "id": "scheduler.extension",
-      "description": "Collect BTC prices every minute and prune history daily at 00:05 UTC.",
+      "id": "scheduler.user",
+      "description": "Collect your BTC prices and check alerts every minute, prune your history daily at 00:05 UTC, and optionally send a daily summary at 09:00 UTC.",
       "policies": [
         {
           "handler": "collect-prices",
@@ -146,13 +128,7 @@
           "handler": "prune-history",
           "cron_expression": "5 0 * * *",
           "timezone": "UTC"
-        }
-      ]
-    },
-    {
-      "id": "scheduler.user",
-      "description": "Check your alerts every minute and optionally send a daily summary at 09:00 UTC.",
-      "policies": [
+        },
         {
           "handler": "check-alerts",
           "cron_expression": "* * * * *",

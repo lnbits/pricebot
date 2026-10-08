@@ -1,35 +1,47 @@
 import assert from 'node:assert/strict'
+import {randomUUID} from 'node:crypto'
 import {test} from 'node:test'
 import {createPricebot} from '../src/logic.js'
 
 const DAY = 86400
 const clone = value => (value == null ? value : structuredClone(value))
 
-function memoryStore() {
-  const tables = new Map()
+function memoryStore(tables, owner) {
   const table = name => {
     if (!tables.has(name)) tables.set(name, new Map())
     return tables.get(name)
   }
   return {
     get(name, id) {
-      return clone(table(name).get(id) || null)
+      const entry = table(name).get(id)
+      return entry?.owner === owner ? clone(entry.row) : null
     },
     set(name, row) {
-      table(name).set(row.id, clone(row))
+      const existing = table(name).get(row.id)
+      if (existing && existing.owner !== owner)
+        throw new Error('Row ID belongs to another owner.')
+      table(name).set(row.id, {owner, row: clone(row)})
     },
     delete(name, id) {
-      table(name).delete(id)
+      if (table(name).get(id)?.owner === owner) table(name).delete(id)
     },
     list(name, options = {}) {
-      const rows = [...table(name).values()].sort((a, b) => {
-        const left = a[options.sortBy],
-          right = b[options.sortBy]
-        return (
-          (left < right ? -1 : left > right ? 1 : 0) *
-          (options.descending ? -1 : 1)
+      const rows = [...table(name).values()]
+        .filter(entry => entry.owner === owner)
+        .map(entry => entry.row)
+        .filter(row =>
+          Object.entries(options.filters || {}).every(
+            ([key, value]) => row[key] === value
+          )
         )
-      })
+        .sort((a, b) => {
+          const left = a[options.sortBy],
+            right = b[options.sortBy]
+          return (
+            (left < right ? -1 : left > right ? 1 : 0) *
+            (options.descending ? -1 : 1)
+          )
+        })
       return {
         data: clone(
           rows.slice(
@@ -43,26 +55,23 @@ function memoryStore() {
   }
 }
 
-function fixture() {
+function fixture({tables = new Map(), owner = 'user'} = {}) {
   let now = 1800000000,
     price = 100000,
-    sequence = 0,
     fails = false
-  const storage = memoryStore(),
-    shared = memoryStore(),
+  const storage = memoryStore(tables, owner),
     jobs = new Map(),
     messages = []
   let saves = 0,
     clockReads = 0
   const bot = createPricebot({
     storage,
-    shared,
     system: {
       now: () => {
         clockReads++
         return now
       },
-      id: prefix => `${prefix}-${++sequence}`
+      id: prefix => `${prefix}-${randomUUID()}`
     },
     currencies: {rate: () => ({price})},
     notifications: {
@@ -76,9 +85,11 @@ function fixture() {
       list: scope =>
         [...jobs.values()].filter(job => job.scope === scope).map(clone),
       set(job) {
+        assert.equal(job.scope, 'user')
         saves++
-        const value = {...job, id: `${job.scope}:${job.handler}`}
-        jobs.set(value.id, clone(value))
+        const key = `${job.scope}:${job.handler}`
+        const value = {...job, id: `${owner}:${key}`}
+        jobs.set(key, clone(value))
         return value
       }
     }
@@ -86,7 +97,6 @@ function fixture() {
   return {
     bot,
     storage,
-    shared,
     jobs,
     messages,
     now: () => now,
@@ -113,10 +123,10 @@ function fixture() {
   }
 }
 
-test('creates two shared jobs and at most one user job per handler', () => {
+test('creates only user jobs and reuses one job per handler', () => {
   const f = fixture()
-  f.bot.setupShared()
-  f.bot.setupShared()
+  f.bot.setupJobs()
+  f.bot.setupJobs()
   assert.equal(f.jobs.size, 2)
   f.alert()
   f.alert({name: 'Another'})
@@ -128,6 +138,54 @@ test('creates two shared jobs and at most one user job per handler', () => {
   assert.equal(f.jobs.size, 4)
 })
 
+test('saving preferences starts collection without separate setup', () => {
+  const f = fixture()
+  f.bot.savePreferences({channel: 'email', dailySummary: false})
+  assert.equal(f.jobs.size, 4)
+  assert.equal(f.jobs.get('user:collect-prices').enabled, true)
+  assert.equal(f.jobs.get('user:prune-history').enabled, true)
+  assert.equal(f.jobs.get('user:check-alerts').enabled, true)
+  assert.equal(f.jobs.get('user:daily-summary').enabled, false)
+})
+
+test('opening a fresh account does not start jobs or collect history', () => {
+  const f = fixture()
+  const state = f.bot.getState()
+  assert.equal(state.price, null)
+  assert.equal(state.stale, true)
+  assert.equal(state.preferences, null)
+  assert.deepEqual(state.jobs, [])
+  assert.equal(f.storage.list('prices').total, 0)
+})
+
+test('users collect the same hour independently and prune only their own history', () => {
+  const tables = new Map()
+  const alice = fixture({tables, owner: 'alice'})
+  const bob = fixture({tables, owner: 'bob'})
+  alice.alert()
+  bob.alert()
+  alice.observe(100000)
+  assert.equal(bob.bot.getState().price, null)
+  bob.observe(200000)
+  alice.advance(60)
+  bob.advance(60)
+  alice.observe(100100)
+  bob.observe(200010)
+  assert.equal(alice.bot.checkAlerts().queued, 1)
+  assert.equal(bob.bot.checkAlerts().queued, 0)
+  assert.equal(alice.bot.getState().price, 100100)
+  assert.equal(bob.bot.getState().price, 200010)
+  const aliceRow = alice.storage.list('prices').data[0]
+  const bobRow = bob.storage.list('prices').data[0]
+  assert.equal(aliceRow.hour, bobRow.hour)
+  assert.notEqual(aliceRow.id, bobRow.id)
+  assert.equal(alice.storage.get('prices', bobRow.id), null)
+  alice.advance(3 * DAY)
+  assert.equal(alice.bot.pruneHistory().deleted, 1)
+  assert.equal(alice.storage.list('prices').total, 0)
+  assert.equal(bob.storage.list('prices').total, 1)
+})
+
 test('stores one observation per minute in hourly records', () => {
   const f = fixture()
   f.observe(100000)
@@ -135,7 +193,7 @@ test('stores one observation per minute in hourly records', () => {
   assert.equal(f.bot.collectPrices().collected, false)
   f.advance(60)
   f.observe(100100)
-  const rows = f.shared.list('prices').data
+  const rows = f.storage.list('prices').data
   assert.equal(rows.length, 1)
   assert.deepEqual(
     JSON.parse(rows[0].samples_json).map(value => value[1]),
@@ -282,7 +340,7 @@ test('pruning removes expired records and partial buckets without losing the bou
   f.observe(100002, cutoff)
   f.observe(100003, end)
   f.bot.pruneHistory()
-  const samples = f.shared
+  const samples = f.storage
     .list('prices', {limit: 1000})
     .data.flatMap(row => JSON.parse(row.samples_json))
   assert.deepEqual(

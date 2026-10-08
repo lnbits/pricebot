@@ -25,16 +25,6 @@ interface host {
   notifications-send-user-notification: func(request: notification-request) -> notification-response;
 }
 
-interface storage-shared {
-  use host.{storage-get-request, storage-get-response, storage-set-request,
-    storage-set-response, storage-paginated-request, storage-paginated-response,
-    storage-delete-response};
-  get: func(request: storage-get-request) -> storage-get-response;
-  set: func(request: storage-set-request) -> storage-set-response;
-  get-paginated: func(request: storage-paginated-request) -> storage-paginated-response;
-  %delete: func(request: storage-get-request) -> storage-delete-response;
-}
-
 interface utils-currencies {
   record rate-request { currency: string }
   record rate-response { rate: f64, price: f64 }
@@ -55,11 +45,10 @@ interface scheduler {
 
 world pricebot {
   import host;
-  import storage-shared;
   import scheduler;
   import utils-currencies;
   export get-state: func(request-json: string) -> string;
-  export setup-shared: func(request-json: string) -> string;
+  export setup-jobs: func(request-json: string) -> string;
   export save-preferences: func(request-json: string) -> string;
   export save-alert: func(request-json: string) -> string;
   export delete-alert: func(request-json: string) -> string;
