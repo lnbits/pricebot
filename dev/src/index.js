@@ -1,5 +1,7 @@
 import {
   storageGet,
+  storageGetPublic,
+  storageGetPublicPaginated,
   storageSet,
   storageGetPaginated,
   storageDelete,
@@ -45,6 +47,9 @@ const bot = createPricebot({
     storageSet,
     storageGetPaginated,
     storageDelete
+  ),
+  publicStorage: storageAdapter(storageGetPublic, undefined, request =>
+    storageGetPublicPaginated({...request, sourceId: 'btc-usd'})
   ),
   scheduler: {
     list(scope) {
@@ -97,8 +102,8 @@ function interactive(method, value) {
 export function getState(value) {
   return interactive('getState', value)
 }
-export function setupJobs(value) {
-  return interactive('setupJobs', value)
+export function getHistory(value) {
+  return interactive('getHistory', value)
 }
 export function savePreferences(value) {
   return interactive('savePreferences', value)
@@ -111,9 +116,6 @@ export function deleteAlert(value) {
 }
 export function collectPrices(value) {
   return JSON.stringify(bot.collectPrices(request(value)))
-}
-export function pruneHistory(value) {
-  return JSON.stringify(bot.pruneHistory(request(value)))
 }
 export function checkAlerts(value) {
   return JSON.stringify(bot.checkAlerts(request(value)))

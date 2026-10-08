@@ -14,7 +14,7 @@
         "visibility": "authenticated"
       },
       {
-        "name": "setup-jobs",
+        "name": "get-history",
         "visibility": "authenticated"
       },
       {
@@ -31,10 +31,6 @@
       },
       {
         "name": "collect-prices",
-        "visibility": "event"
-      },
-      {
-        "name": "prune-history",
         "visibility": "event"
       },
       {
@@ -62,9 +58,9 @@
       "auth": "user"
     },
     {
-      "method": "POST",
-      "path": "/setup",
-      "export": "setup-jobs",
+      "method": "GET",
+      "path": "/history",
+      "export": "get-history",
       "auth": "user"
     },
     {
@@ -105,11 +101,11 @@
     },
     {
       "id": "ext.storage.read",
-      "description": "Read your Pricebot price history, alerts, settings, and notification state."
+      "description": "Read Pricebot history in its collector context and your private alerts, preferences, and notification state."
     },
     {
       "id": "ext.storage.write",
-      "description": "Save your Pricebot price history, alerts, settings, and notification state."
+      "description": "Store shared price history from the collector and private alerts, preferences, and notification state for each user."
     },
     {
       "id": "notifications.send_user_notification",
@@ -117,18 +113,8 @@
     },
     {
       "id": "scheduler.user",
-      "description": "Collect your BTC prices and check alerts every minute, prune your history daily at 00:05 UTC, and optionally send a daily summary at 09:00 UTC.",
+      "description": "Check your alerts every minute and optionally send your daily summary at 09:00 UTC.",
       "policies": [
-        {
-          "handler": "collect-prices",
-          "cron_expression": "* * * * *",
-          "timezone": "UTC"
-        },
-        {
-          "handler": "prune-history",
-          "cron_expression": "5 0 * * *",
-          "timezone": "UTC"
-        },
         {
           "handler": "check-alerts",
           "cron_expression": "* * * * *",
@@ -138,6 +124,23 @@
           "handler": "daily-summary",
           "cron_expression": "0 9 * * *",
           "timezone": "UTC"
+        }
+      ]
+    },
+    {
+      "id": "ext.storage.read_public",
+      "description": "Read the common BTC/USD price history. Alerts and account preferences stay private.",
+      "policies": [
+        {
+          "table_name": "history",
+          "source_id_field": "series",
+          "public_fields": [
+            "id",
+            "series",
+            "resolution",
+            "start",
+            "buckets_json"
+          ]
         }
       ]
     }

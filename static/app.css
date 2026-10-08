@@ -40,6 +40,17 @@ h2 {
   letter-spacing: 2px;
   color: #e6bb79;
 }
+.brand-icon {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: #f6a43a;
+  color: #171b23;
+  font-size: 36px;
+  font-weight: 700;
+}
 .price {
   font-size: clamp(38px, 6vw, 64px);
   font-weight: 650;
@@ -53,8 +64,97 @@ h2 {
   border-radius: 16px;
   padding: 24px;
 }
-.admin-panel {
-  padding: 8px 12px 16px;
+.price-history {
+  margin-top: 28px;
+}
+.chart-ranges {
+  display: flex;
+  gap: 8px;
+}
+.chart-range {
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 14px;
+  cursor: pointer;
+  background: transparent;
+  color: #a3acbc;
+  font: inherit;
+  font-size: 13px;
+}
+.chart-range:hover,
+.chart-range.is-selected {
+  color: #f6c17a;
+  background: #493b28;
+}
+.chart-range:focus-visible,
+.price-chart:focus-visible {
+  outline: 2px solid #f6a43a;
+  outline-offset: 3px;
+}
+.chart-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  min-height: 50px;
+  margin-top: 16px;
+  font-size: 13px;
+  align-content: center;
+}
+.price-chart {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  touch-action: pan-y;
+}
+.chart-grid {
+  stroke: #40454b;
+  stroke-width: 0.7;
+  stroke-dasharray: 3 5;
+}
+.chart-axis {
+  fill: #a3acbc;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-rising {
+  color: #7ddbb0;
+}
+.chart-falling {
+  color: #ffa7a7;
+}
+.chart-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.chart-band {
+  fill: currentColor;
+  opacity: 0.12;
+}
+.chart-dot {
+  fill: currentColor;
+}
+.chart-crosshair {
+  stroke: #a3acbc;
+  stroke-dasharray: 4 4;
+}
+.chart-caption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  margin-top: 12px;
+}
+.chart-empty {
+  min-height: 200px;
+  display: grid;
+  place-items: center;
+  color: #a3acbc;
+  text-align: center;
 }
 .alert-row {
   padding: 18px 0;

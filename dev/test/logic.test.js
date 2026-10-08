@@ -1,353 +1,200 @@
 import assert from 'node:assert/strict'
-import {randomUUID} from 'node:crypto'
 import {test} from 'node:test'
-import {createPricebot} from '../src/logic.js'
+import {fixture} from './helpers.js'
+import {DAY, HOUR} from '../src/history.js'
 
-const DAY = 86400
-const clone = value => (value == null ? value : structuredClone(value))
+test('users immediately see the same collected history while alerts remain private', () => {
+  const tables = new Map(),
+    alice = fixture({tables}),
+    bob = fixture({tables, owner: 'bob'})
+  alice.observe(100000)
+  assert.equal(bob.bot.getState().price, 100000)
+  assert.deepEqual(bob.bot.getHistory(), alice.bot.getHistory())
+  const alert = alice.alert()
+  assert.equal(bob.bot.getState().alerts.length, 0)
+  assert.throws(() => bob.bot.deleteAlert({alertId: alert.id}), /not found/)
+  assert.equal(alice.storage.list('history').total, 0)
+  assert.equal(bob.jobs.size, 0)
+})
 
-function memoryStore(tables, owner) {
-  const table = name => {
-    if (!tables.has(name)) tables.set(name, new Map())
-    return tables.get(name)
-  }
-  return {
-    get(name, id) {
-      const entry = table(name).get(id)
-      return entry?.owner === owner ? clone(entry.row) : null
-    },
-    set(name, row) {
-      const existing = table(name).get(row.id)
-      if (existing && existing.owner !== owner)
-        throw new Error('Row ID belongs to another owner.')
-      table(name).set(row.id, {owner, row: clone(row)})
-    },
-    delete(name, id) {
-      if (table(name).get(id)?.owner === owner) table(name).delete(id)
-    },
-    list(name, options = {}) {
-      const rows = [...table(name).values()]
-        .filter(entry => entry.owner === owner)
-        .map(entry => entry.row)
-        .filter(row =>
-          Object.entries(options.filters || {}).every(
-            ([key, value]) => row[key] === value
-          )
-        )
-        .sort((a, b) => {
-          const left = a[options.sortBy],
-            right = b[options.sortBy]
-          return (
-            (left < right ? -1 : left > right ? 1 : 0) *
-            (options.descending ? -1 : 1)
-          )
-        })
-      return {
-        data: clone(
-          rows.slice(
-            options.offset || 0,
-            (options.offset || 0) + (options.limit || 100)
-          )
-        ),
-        total: rows.length
-      }
-    }
-  }
-}
-
-function fixture({tables = new Map(), owner = 'user'} = {}) {
-  let now = 1800000000,
-    price = 100000,
-    fails = false
-  const storage = memoryStore(tables, owner),
-    jobs = new Map(),
-    messages = []
-  let saves = 0,
-    clockReads = 0
-  const bot = createPricebot({
-    storage,
-    system: {
-      now: () => {
-        clockReads++
-        return now
-      },
-      id: prefix => `${prefix}-${randomUUID()}`
-    },
-    currencies: {rate: () => ({price})},
-    notifications: {
-      send(channel, message) {
-        if (fails) throw new Error('Queue unavailable')
-        messages.push({channel, message})
-        return {queued: true}
-      }
-    },
-    scheduler: {
-      list: scope =>
-        [...jobs.values()].filter(job => job.scope === scope).map(clone),
-      set(job) {
-        assert.equal(job.scope, 'user')
-        saves++
-        const key = `${job.scope}:${job.handler}`
-        const value = {...job, id: `${owner}:${key}`}
-        jobs.set(key, clone(value))
-        return value
-      }
-    }
-  })
-  return {
-    bot,
-    storage,
-    jobs,
-    messages,
-    now: () => now,
-    advance: seconds => (now += seconds),
-    setTime: value => (now = value),
-    setPrice: value => (price = value),
-    failNotifications: value => (fails = value),
-    saves: () => saves,
-    clockReads: () => clockReads,
-    observe(value, timestamp = now) {
-      now = timestamp
-      price = value
-      bot.collectPrices()
-    },
-    alert(options = {}) {
-      bot.savePreferences({channel: 'email', dailySummary: false})
-      return bot.saveAlert({
-        name: 'My alert',
-        amountUsd: 100,
-        windowMinutes: 1,
-        ...options
-      }).alert
-    }
-  }
-}
-
-test('creates only user jobs and reuses one job per handler', () => {
+test('saving alerts needs no preferences and never creates a user collector', () => {
   const f = fixture()
-  f.bot.setupJobs()
-  f.bot.setupJobs()
-  assert.equal(f.jobs.size, 2)
   f.alert()
   f.alert({name: 'Another'})
-  assert.equal(f.jobs.size, 4)
-  assert.equal(f.saves(), 4, 'saving alerts must not postpone existing jobs')
-  assert.equal(f.jobs.get('user:daily-summary').enabled, false)
-  f.bot.savePreferences({channel: 'nostr', dailySummary: true})
-  assert.equal(f.jobs.get('user:daily-summary').enabled, true)
-  assert.equal(f.jobs.size, 4)
+  assert.deepEqual([...f.jobs.keys()], ['check-alerts'])
+  assert.equal(f.saves(), 1)
+  f.bot.savePreferences({channels: ['nostr'], dailySummary: true})
+  assert.equal(f.jobs.size, 2)
+  assert.equal(f.jobs.get('daily-summary').enabled, true)
+  f.bot.savePreferences({channels: ['email'], dailySummary: false})
+  assert.equal(f.jobs.get('daily-summary').enabled, false)
 })
 
-test('saving preferences starts collection without separate setup', () => {
+test('price returning to its starting value still triggers a within-window fluctuation', () => {
   const f = fixture()
-  f.bot.savePreferences({channel: 'email', dailySummary: false})
-  assert.equal(f.jobs.size, 4)
-  assert.equal(f.jobs.get('user:collect-prices').enabled, true)
-  assert.equal(f.jobs.get('user:prune-history').enabled, true)
-  assert.equal(f.jobs.get('user:check-alerts').enabled, true)
-  assert.equal(f.jobs.get('user:daily-summary').enabled, false)
-})
-
-test('opening a fresh account does not start jobs or collect history', () => {
-  const f = fixture()
-  const state = f.bot.getState()
-  assert.equal(state.price, null)
-  assert.equal(state.stale, true)
-  assert.equal(state.preferences, null)
-  assert.deepEqual(state.jobs, [])
-  assert.equal(f.storage.list('prices').total, 0)
-})
-
-test('users collect the same hour independently and prune only their own history', () => {
-  const tables = new Map()
-  const alice = fixture({tables, owner: 'alice'})
-  const bob = fixture({tables, owner: 'bob'})
-  alice.alert()
-  bob.alert()
-  alice.observe(100000)
-  assert.equal(bob.bot.getState().price, null)
-  bob.observe(200000)
-  alice.advance(60)
-  bob.advance(60)
-  alice.observe(100100)
-  bob.observe(200010)
-  assert.equal(alice.bot.checkAlerts().queued, 1)
-  assert.equal(bob.bot.checkAlerts().queued, 0)
-  assert.equal(alice.bot.getState().price, 100100)
-  assert.equal(bob.bot.getState().price, 200010)
-  const aliceRow = alice.storage.list('prices').data[0]
-  const bobRow = bob.storage.list('prices').data[0]
-  assert.equal(aliceRow.hour, bobRow.hour)
-  assert.notEqual(aliceRow.id, bobRow.id)
-  assert.equal(alice.storage.get('prices', bobRow.id), null)
-  alice.advance(3 * DAY)
-  assert.equal(alice.bot.pruneHistory().deleted, 1)
-  assert.equal(alice.storage.list('prices').total, 0)
-  assert.equal(bob.storage.list('prices').total, 1)
-})
-
-test('stores one observation per minute in hourly records', () => {
-  const f = fixture()
+  f.alert({channels: ['email', 'telegram', 'nostr']})
   f.observe(100000)
-  f.setPrice(200000)
-  assert.equal(f.bot.collectPrices().collected, false)
-  f.advance(60)
-  f.observe(100100)
-  const rows = f.storage.list('prices').data
-  assert.equal(rows.length, 1)
-  assert.deepEqual(
-    JSON.parse(rows[0].samples_json).map(value => value[1]),
-    [100000, 100100]
+  f.observe(100700, f.now() + 60)
+  f.observe(100000, f.now() + 60)
+  assert.equal(f.bot.checkAlerts().queued, 3)
+  assert.match(
+    f.messages[0].message,
+    /fluctuated by \$700.00 within the last 1 hour/
   )
-  f.setPrice(NaN)
-  assert.throws(() => f.bot.collectPrices(), /invalid BTC price/)
+  assert.equal(f.bot.checkAlerts().queued, 0)
+  f.observe(100100, f.now() + HOUR)
+  assert.equal(f.bot.checkAlerts().queued, 0)
+  f.observe(99500, f.now() + 60)
+  assert.equal(f.bot.checkAlerts().queued, 3)
 })
 
-test('alerts on crossings in either direction and rearms only when the condition clears', () => {
+test('the ten-minute boundary is inclusive and expired peaks do not trigger', () => {
   const f = fixture()
-  f.alert()
+  f.alert({windowCount: 10, windowUnit: 'minute'})
   f.observe(100000)
-  assert.equal(f.bot.checkAlerts().queued, 0)
-  f.advance(60)
-  f.observe(100100)
+  f.observe(100500, f.now() + 600)
   assert.equal(f.bot.checkAlerts().queued, 1)
-  assert.match(f.messages[0].message, /rose \$100.00/)
+  f.observe(100500, f.now() + 60)
   assert.equal(f.bot.checkAlerts().queued, 0)
-  f.advance(60)
-  f.observe(100300)
-  assert.equal(f.bot.checkAlerts().queued, 0)
-  f.advance(60)
-  f.observe(100310)
-  assert.equal(f.bot.checkAlerts().queued, 0)
-  f.advance(60)
-  f.observe(100100)
+  f.observe(101000, f.now() + 60)
   assert.equal(f.bot.checkAlerts().queued, 1)
-  assert.match(f.messages[1].message, /fell \$210.00/)
 })
 
-test('does not compare across missing history or use a stale price', () => {
+test('failed channels retry without resending successful channels', () => {
   const f = fixture()
-  f.alert({windowMinutes: 10})
+  f.alert({channels: ['email', 'telegram', 'nostr']})
   f.observe(100000)
-  f.advance(20 * 60)
-  f.observe(110000)
+  f.observe(100500, f.now() + 60)
+  f.failChannels(['telegram'])
+  assert.throws(() => f.bot.checkAlerts(), /Unsent channels/)
+  assert.deepEqual(
+    f.messages.map(row => row.channel),
+    ['email', 'nostr']
+  )
+  assert.throws(() => f.bot.checkAlerts(), /Unsent channels/)
+  assert.equal(f.messages.length, 2)
+  f.failChannels([])
+  assert.equal(f.bot.checkAlerts().queued, 1)
+  assert.deepEqual(
+    f.messages.map(row => row.channel),
+    ['email', 'nostr', 'telegram']
+  )
   assert.equal(f.bot.checkAlerts().queued, 0)
-  f.advance(10 * 60)
-  f.observe(120000)
+})
+
+test('stale prices and disjoint observations outside the window do not notify', () => {
+  const f = fixture()
+  f.alert({windowCount: 10, windowUnit: 'minute'})
+  f.observe(100000)
+  f.observe(105000, f.now() + 1200)
+  assert.equal(f.bot.checkAlerts().queued, 0)
+  f.observe(110000, f.now() + 60)
   f.advance(121)
   assert.equal(f.bot.checkAlerts().queued, 0)
   assert.equal(f.bot.getState().stale, true)
 })
 
-test('notification failure does not mark an alert as sent', () => {
+test('supports all interval units and rejects malformed alerts', () => {
   const f = fixture()
-  f.alert()
-  f.observe(100000)
-  f.advance(60)
-  f.observe(101000)
-  f.failNotifications(true)
-  assert.throws(() => f.bot.checkAlerts(), /Queue unavailable/)
-  f.failNotifications(false)
-  assert.equal(f.bot.checkAlerts().queued, 1)
-})
-
-test('processing three days of history keeps clock host calls constant', () => {
-  const f = fixture()
-  f.alert()
-  const start = f.now() - 3 * DAY
-  for (let i = 0; i <= 3 * 1440; i++) f.observe(100000 + i, start + i * 60)
-  const before = f.clockReads()
-  assert.equal(f.bot.checkAlerts().queued, 0)
-  assert.equal(f.clockReads() - before, 2)
-})
-
-test('supports 24-hour windows and rejects invalid input', () => {
-  const f = fixture()
-  f.alert({windowMinutes: 1440})
-  f.observe(100000)
-  f.advance(DAY)
-  f.observe(101000)
-  assert.equal(f.bot.checkAlerts().queued, 1)
-  for (const windowMinutes of [0, 1.5, 1441, 10080]) {
-    assert.throws(
-      () => f.bot.saveAlert({name: 'Invalid', amountUsd: 100, windowMinutes}),
-      /window must/
+  for (const unit of ['minute', 'hour', 'day', 'week', 'month'])
+    assert.equal(
+      f.alert({windowCount: unit === 'minute' ? 10 : 1, windowUnit: unit})
+        .window_unit,
+      unit
     )
-  }
-  assert.throws(
-    () =>
-      f.bot.saveAlert({
-        alertId: 'another-users-alert',
-        name: 'Invalid',
-        amountUsd: 100,
-        windowMinutes: 10
-      }),
-    /not found/
-  )
-  assert.throws(
-    () => f.bot.savePreferences({channel: 'http://example.org'}),
-    /Choose/
-  )
+  for (const options of [
+    {windowCount: 9, windowUnit: 'minute'},
+    {windowCount: 0},
+    {windowCount: 1.5},
+    {windowCount: Number.MAX_SAFE_INTEGER},
+    {windowUnit: 'year'},
+    {windowUnit: '__proto__'},
+    {channels: []},
+    {channels: ['sms']},
+    {channels: 'email'},
+    {amountUsd: NaN},
+    {enabled: 'false'},
+    {name: ''}
+  ])
+    assert.throws(() => f.alert(options))
+  assert.deepEqual(f.alert({channels: ['nostr', 'email', 'email']}).channels, [
+    'email',
+    'nostr'
+  ])
 })
 
-test('paused and deleted alerts do not notify, and edits re-evaluate a changed rule', () => {
-  const f = fixture()
-  const alert = f.alert({enabled: false})
+test('disabled/deleted alerts do not notify; enabling or changing the rule rearms', () => {
+  const f = fixture(),
+    alert = f.alert({enabled: false})
   f.observe(100000)
-  f.advance(60)
-  f.observe(101000)
+  f.observe(100700, f.now() + 60)
   assert.equal(f.bot.checkAlerts().queued, 0)
-  f.bot.saveAlert({
-    alertId: alert.id,
-    name: 'Enabled',
-    amountUsd: 100,
-    windowMinutes: 1
-  })
+  f.alert({alertId: alert.id, enabled: true})
+  assert.equal(f.bot.checkAlerts().queued, 1)
+  f.alert({alertId: alert.id, name: 'Renamed'})
+  assert.equal(f.bot.checkAlerts().queued, 0)
+  f.alert({alertId: alert.id, amountUsd: 600})
   assert.equal(f.bot.checkAlerts().queued, 1)
   f.bot.deleteAlert({alertId: alert.id})
   assert.equal(f.bot.checkAlerts().queued, 0)
   assert.equal(f.storage.get('state', `alert:${alert.id}`), null)
 })
 
-test('daily summary requires opt-in and history, and queues once per UTC day', () => {
+test('fifty alerts can notify within the storage-call budget', () => {
   const f = fixture()
-  f.bot.savePreferences({channel: 'telegram', dailySummary: true})
+  for (let i = 0; i < 50; i++) f.alert({name: `Alert ${i}`})
+  assert.throws(() => f.alert(), /up to 50/)
   f.observe(100000)
-  assert.equal(f.bot.dailySummary({scheduleId: 'daily'}).queued, 0)
-  f.advance(DAY)
-  f.observe(110000)
-  assert.equal(f.bot.dailySummary({scheduleId: 'daily'}).queued, 1)
+  f.observe(100700, f.now() + 60)
+  f.storage.calls.length = 0
+  f.publicStorage.calls.length = 0
+  assert.equal(f.bot.checkAlerts().queued, 15)
+  assert.ok(f.storage.calls.length + f.publicStorage.calls.length < 100)
+  for (const count of [15, 15, 5]) {
+    f.observe(100700, f.now() + 60)
+    assert.equal(f.bot.checkAlerts().queued, count)
+  }
+  assert.equal(f.bot.checkAlerts().queued, 0)
+})
+
+test('daily summary uses common history and sends once per channel per UTC day', () => {
+  const f = fixture()
+  f.bot.savePreferences({channels: ['email', 'telegram'], dailySummary: true})
+  f.observe(100000)
+  assert.equal(f.bot.dailySummary().queued, 0)
+  f.observe(110000, f.now() + DAY)
+  f.failChannels(['telegram'])
+  assert.throws(() => f.bot.dailySummary(), /could not be queued/)
   assert.match(
     f.messages[0].message,
     /24-hour change: \+\$10000.00 \(\+10.00%\)/
   )
-  assert.equal(f.bot.dailySummary({scheduleId: 'daily'}).queued, 0)
-  f.advance(DAY)
-  f.observe(120000)
-  assert.equal(f.bot.dailySummary({scheduleId: 'daily'}).queued, 1)
-  f.bot.savePreferences({channel: 'telegram', dailySummary: false})
-  f.advance(DAY)
-  f.observe(130000)
-  assert.equal(f.bot.dailySummary({scheduleId: 'daily'}).queued, 0)
+  f.failChannels([])
+  assert.equal(f.bot.dailySummary().queued, 1)
+  assert.equal(f.bot.dailySummary().queued, 0)
+  f.bot.savePreferences({channels: ['email'], dailySummary: false})
+  f.observe(120000, f.now() + DAY)
+  assert.equal(f.bot.dailySummary().queued, 0)
 })
 
-test('pruning removes expired records and partial buckets without losing the boundary sample', () => {
-  const f = fixture(),
-    end = f.now(),
-    cutoff = end - 2 * DAY
-  for (let i = 0; i < 205; i++) f.observe(100000, cutoff - (206 - i) * 3600)
-  f.observe(100001, cutoff - 60)
-  f.observe(100002, cutoff)
-  f.observe(100003, end)
-  f.bot.pruneHistory()
-  const samples = f.storage
-    .list('prices', {limit: 1000})
-    .data.flatMap(row => JSON.parse(row.samples_json))
-  assert.deepEqual(
-    samples.sort((a, b) => a[0] - b[0]),
-    [
-      [cutoff, 100002],
-      [end, 100003]
-    ]
+test('a notification burst drains without duplicates even after the original window clears', () => {
+  const f = fixture()
+  for (let i = 0; i < 15; i++)
+    f.alert({
+      name: `Alert ${i}`,
+      windowCount: 10,
+      windowUnit: 'minute',
+      channels: ['email', 'telegram', 'nostr']
+    })
+  f.observe(100000)
+  f.observe(101000, f.now() + 60)
+  assert.equal(f.bot.checkAlerts().queued, 15)
+  f.observe(101000, f.now() + 11 * 60)
+  assert.equal(f.bot.checkAlerts().queued, 15)
+  assert.equal(f.bot.checkAlerts().queued, 15)
+  assert.equal(f.bot.checkAlerts().queued, 0)
+  assert.equal(
+    new Set(f.messages.map(row => row.channel + row.message)).size,
+    45
   )
 })

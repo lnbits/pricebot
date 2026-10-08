@@ -1,18 +1,26 @@
 {
   "version": 1,
   "tables": {
-    "prices": {
+    "history": {
       "fields": [
         {
           "name": "id",
           "type": "string"
         },
         {
-          "name": "hour",
+          "name": "series",
+          "type": "string"
+        },
+        {
+          "name": "resolution",
+          "type": "string"
+        },
+        {
+          "name": "start",
           "type": "integer"
         },
         {
-          "name": "samples_json",
+          "name": "buckets_json",
           "type": "string"
         }
       ]
@@ -24,7 +32,7 @@
           "type": "string"
         },
         {
-          "name": "channel",
+          "name": "channels_json",
           "type": "string"
         },
         {
@@ -48,8 +56,16 @@
           "type": "number"
         },
         {
-          "name": "window_minutes",
+          "name": "window_count",
           "type": "integer"
+        },
+        {
+          "name": "window_unit",
+          "type": "string"
+        },
+        {
+          "name": "channels_json",
+          "type": "string"
         },
         {
           "name": "enabled",

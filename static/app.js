@@ -24,12 +24,7 @@ const app = Vue.createApp({
     return h('main', [
       h('header', {class: 'row items-center justify-between q-mb-xl'}, [
         h('div', {class: 'row items-center q-gutter-md'}, [
-          h('img', {
-            src: '/ext-assets/pricebot/icon.svg',
-            width: 54,
-            height: 54,
-            alt: ''
-          }),
+          h('span', {class: 'brand-icon', 'aria-hidden': 'true'}, '₿'),
           h('div', [
             h('h1', 'Pricebot'),
             muted('Bitcoin moves. Stay informed.', 'q-mb-none')
@@ -82,6 +77,12 @@ const app = Vue.createApp({
                 : 'over the last 24 hours'
             )
           ]),
+          h(PricebotChart, {
+            history: this.history,
+            range: this.range,
+            loading: this.chartLoading,
+            onRange: this.changeRange
+          }),
           muted(
             `${this.date(state?.observedAt)} · Rates provided by LNbits`,
             'text-caption q-mt-lg q-mb-none'
@@ -99,19 +100,15 @@ const app = Vue.createApp({
                 textColor: 'black',
                 icon: 'add',
                 label: 'New alert',
-                disable: !state?.preferences || this.busy,
+                disable: this.busy || !state,
                 onClick: () => this.openAlert()
               })
             ]),
-            !state?.preferences
+            !state?.alerts.length
               ? muted(
-                  'Choose your notification channel and save settings to create your first alert.'
+                  'Create an alert for the price fluctuation you care about.'
                 )
-              : !state.alerts.length
-                ? muted(
-                    'Create an alert for a price movement you care about. Pricebot checks both rises and falls.'
-                  )
-                : null,
+              : null,
             ...(state?.alerts || []).map(alert =>
               h('article', {key: alert.id, class: 'alert-row'}, [
                 h(
@@ -129,7 +126,7 @@ const app = Vue.createApp({
                           : null
                       ]),
                       muted(
-                        `${this.dollars(alert.amount_usd)} in ${alert.window_minutes} minutes`,
+                        `${this.dollars(alert.amount_usd)} fluctuation within ${alert.window_count} ${alert.window_unit}${alert.window_count === 1 ? '' : 's'} · ${alert.channels.map(this.channelName).join(', ')}`,
                         'q-mt-xs q-mb-none'
                       )
                     ]),
@@ -158,7 +155,7 @@ const app = Vue.createApp({
               ])
             ),
             muted(
-              'One notification when a threshold is crossed. The alert rearms when the price movement falls below your threshold. New windows wait until enough history is collected.',
+              'An alert compares the highest and lowest recorded prices within its window. Each selected channel is notified once; the alert rearms below your threshold.',
               'text-caption q-mt-lg q-mb-none'
             )
           ])
@@ -168,12 +165,16 @@ const app = Vue.createApp({
             'q-form',
             {ref: 'settingsForm', class: 'panel', onSubmit: this.saveSettings},
             [
-              h('h2', {class: 'q-mb-lg'}, 'Notifications'),
+              h('h2', {class: 'q-mb-lg'}, 'Daily summary'),
               q('q-select', {
-                ...model(this, 'channel'),
+                ...model(this, 'channels'),
                 outlined: true,
-                options: ['email', 'nostr', 'telegram'],
-                label: 'Send notifications via',
+                options: this.channelOptions,
+                multiple: true,
+                emitValue: true,
+                mapOptions: true,
+                useChips: true,
+                label: 'Summary channels',
                 class: 'q-mb-sm'
               }),
               muted(
@@ -201,34 +202,13 @@ const app = Vue.createApp({
                 class: 'q-mt-sm full-width'
               })
             ]
-          ),
-          q(
-            'q-expansion-item',
-            {
-              label: 'Your price collection',
-              icon: 'settings',
-              class: 'panel admin-panel q-mt-lg'
-            },
-            [
-              muted(
-                'Saving notification settings starts your price collection. You can also start it here. Prices are collected every minute; your history is pruned daily at 00:05 UTC.',
-                'text-caption q-mt-md'
-              ),
-              q('q-btn', {
-                outline: true,
-                color: 'primary',
-                label: 'Start / resume price collection',
-                loading: this.busy,
-                onClick: this.setup
-              })
-            ]
           )
         ])
       ]),
       h(
         'footer',
         {class: 'muted text-caption q-mt-xl'},
-        'Alert windows: 1 minute to 24 hours · 48-hour history retention with daily cleanup · USD'
+        'Shared BTC/USD history · Minute prices: 1 day · Hourly: 7 days · Daily: 366 days · Monthly: forever'
       ),
       q('q-dialog', model(this, 'dialog'), [
         q('q-card', {class: 'alert-dialog'}, [
@@ -252,25 +232,57 @@ const app = Vue.createApp({
                 min: '0.01',
                 max: '1000000000',
                 step: '0.01',
-                label: 'Price change (USD)',
+                label: 'Price fluctuation (USD)',
                 rules: [value => Number(value) > 0 || 'Enter a positive amount']
               }),
-              q('q-input', {
-                ...model(this.form, 'windowMinutes', true),
+              h('div', {class: 'row q-col-gutter-sm'}, [
+                h('div', {class: 'col-6'}, [
+                  q('q-input', {
+                    ...model(this.form, 'windowCount', true),
+                    outlined: true,
+                    type: 'number',
+                    min: this.form.windowUnit === 'minute' ? '10' : '1',
+                    step: '1',
+                    label: 'Interval',
+                    rules: [
+                      value =>
+                        (Number.isSafeInteger(Number(value)) &&
+                          value >=
+                            (this.form.windowUnit === 'minute' ? 10 : 1)) ||
+                        'Use at least 10 minutes or 1 other unit'
+                    ]
+                  })
+                ]),
+                h('div', {class: 'col-6'}, [
+                  q('q-select', {
+                    ...model(this.form, 'windowUnit'),
+                    outlined: true,
+                    label: 'Unit',
+                    options: ['minute', 'hour', 'day', 'week', 'month']
+                  })
+                ])
+              ]),
+              muted(
+                'A month is 30 days. Older windows use hourly, daily, then monthly history.',
+                'text-caption'
+              ),
+              q('q-select', {
+                ...model(this.form, 'channels'),
                 outlined: true,
-                type: 'number',
-                min: '1',
-                max: '1440',
-                step: '1',
-                label: 'Over how many minutes?',
+                multiple: true,
+                useChips: true,
+                emitValue: true,
+                mapOptions: true,
+                options: this.channelOptions,
+                label: 'Notify me via',
                 rules: [
-                  value =>
-                    (Number.isInteger(Number(value)) &&
-                      value >= 1 &&
-                      value <= 1440) ||
-                    'Use 1–1,440 whole minutes'
+                  value => value.length > 0 || 'Choose at least one channel'
                 ]
               }),
+              muted(
+                'Uses the email address, Telegram chat, or Nostr identifier saved in your LNbits account.',
+                'text-caption'
+              ),
               q('q-toggle', {
                 ...model(this.form, 'enabled'),
                 label: 'Alert enabled'
@@ -305,11 +317,27 @@ const app = Vue.createApp({
       error: '',
       success: '',
       state: null,
-      channel: 'email',
+      channels: ['email'],
+      channelOptions: [
+        {label: 'Email', value: 'email'},
+        {label: 'Telegram', value: 'telegram'},
+        {label: 'Nostr', value: 'nostr'}
+      ],
+      history: null,
+      range: '1D',
+      chartLoading: true,
+      chartRequest: 0,
       dailySummary: false,
       dialog: false,
       editing: null,
-      form: {name: '', amountUsd: 1000, windowMinutes: 60, enabled: true},
+      form: {
+        name: '',
+        amountUsd: 500,
+        windowCount: 1,
+        windowUnit: 'hour',
+        channels: ['email'],
+        enabled: true
+      },
       timer: null
     }
   },
@@ -336,9 +364,13 @@ const app = Vue.createApp({
     },
     async load(initial = false) {
       try {
-        this.state = await pricebotBridge.call('/state')
+        const [state] = await Promise.all([
+          pricebotBridge.call('/state'),
+          this.loadHistory()
+        ])
+        this.state = state
         if (initial && this.state.preferences) {
-          this.channel = this.state.preferences.channel
+          this.channels = [...this.state.preferences.channels]
           this.dailySummary = this.state.preferences.daily_summary
         }
       } catch (error) {
@@ -367,7 +399,7 @@ const app = Vue.createApp({
       await this.action(
         '/preferences',
         'PUT',
-        {channel: this.channel, dailySummary: this.dailySummary},
+        {channels: this.channels, dailySummary: this.dailySummary},
         'Notification settings saved.'
       )
     },
@@ -378,10 +410,19 @@ const app = Vue.createApp({
         ? {
             name: alert.name,
             amountUsd: alert.amount_usd,
-            windowMinutes: alert.window_minutes,
+            windowCount: alert.window_count,
+            windowUnit: alert.window_unit,
+            channels: [...alert.channels],
             enabled: alert.enabled
           }
-        : {name: '', amountUsd: 1000, windowMinutes: 60, enabled: true}
+        : {
+            name: '',
+            amountUsd: 500,
+            windowCount: 1,
+            windowUnit: 'hour',
+            channels: ['email'],
+            enabled: true
+          }
       this.dialog = true
     },
     async saveAlert() {
@@ -415,13 +456,37 @@ const app = Vue.createApp({
           )
         )
     },
-    setup() {
-      return this.action(
-        '/setup',
-        'POST',
-        {},
-        'Your price collection started. The first sample will arrive on the next minute.'
+    channelName(value) {
+      return (
+        {email: 'Email', telegram: 'Telegram', nostr: 'Nostr'}[value] || value
       )
+    },
+    async changeRange(range) {
+      this.range = range
+      this.history = null
+      await this.loadHistory()
+    },
+    async loadHistory() {
+      const request = ++this.chartRequest
+      this.chartLoading = true
+      try {
+        let history = null,
+          offset = 0
+        do {
+          const page = await pricebotBridge.call(
+            `/history?range=${encodeURIComponent(this.range)}&offset=${offset}`
+          )
+          if (request !== this.chartRequest) return
+          if (!history) history = {...page, chunks: []}
+          history.chunks.push(...page.chunks)
+          offset = page.nextOffset
+        } while (offset !== null)
+        this.history = preparePricebotChart(history)
+      } catch (error) {
+        if (request === this.chartRequest) this.error = error.message
+      } finally {
+        if (request === this.chartRequest) this.chartLoading = false
+      }
     }
   }
 })
