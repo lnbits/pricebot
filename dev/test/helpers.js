@@ -63,11 +63,16 @@ export function fixture({tables = new Map(), owner = 'alice'} = {}) {
     collectorStorage = memoryStore(tables)
   const publicStorage = memoryStore(tables, null),
     jobs = new Map(),
-    messages = []
+    messages = [],
+    logs = []
   const dependencies = {
     storage,
     publicStorage,
-    system: {now: () => now, id: prefix => `${prefix}-${randomUUID()}`},
+    system: {
+      now: () => now,
+      id: prefix => `${prefix}-${randomUUID()}`,
+      log: message => logs.push(message)
+    },
     currencies: {rate: () => ({price})},
     notifications: {
       send(channel, message) {
@@ -99,6 +104,7 @@ export function fixture({tables = new Map(), owner = 'alice'} = {}) {
     publicStorage,
     jobs,
     messages,
+    logs,
     now: () => now,
     advance: seconds => (now += seconds),
     setTime: value => (now = value),

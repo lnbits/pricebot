@@ -7,6 +7,7 @@ import {
   storageDelete,
   randomId,
   now,
+  log,
   notificationsSendUserNotification
 } from 'lnbits:extension/host'
 import {setSchedule, listSchedules} from 'lnbits:extension/scheduler'
@@ -72,6 +73,9 @@ const bot = createPricebot({
     }
   },
   system: {
+    log(message) {
+      log({level: 'info', message})
+    },
     now() {
       return Number(now().timestamp)
     },

@@ -57,6 +57,8 @@ test('the ten-minute boundary is inclusive and expired peaks do not trigger', ()
   f.observe(100500, f.now() + 60)
   assert.equal(f.bot.checkAlerts().queued, 0)
   f.observe(101000, f.now() + 60)
+  assert.equal(f.bot.checkAlerts().queued, 0)
+  f.observe(101000, f.now() + 8 * 60)
   assert.equal(f.bot.checkAlerts().queued, 1)
 })
 
@@ -123,7 +125,7 @@ test('supports all interval units and rejects malformed alerts', () => {
   ])
 })
 
-test('disabled/deleted alerts do not notify; enabling or changing the rule rearms', () => {
+test('disabled/deleted alerts do not notify; enabling or changing the rule resets the cooldown', () => {
   const f = fixture(),
     alert = f.alert({enabled: false})
   f.observe(100000)
@@ -197,4 +199,139 @@ test('a notification burst drains without duplicates even after the original win
     new Set(f.messages.map(row => row.channel + row.message)).size,
     45
   )
+})
+
+test('alerts compare the current price with each extreme instead of the full range', () => {
+  for (const current of [104, 106]) {
+    const f = fixture()
+    const alert = f.alert({amountUsd: 7, windowCount: 10, windowUnit: 'minute'})
+    f.observe(100)
+    f.observe(110, f.now() + 60)
+    f.observe(current, f.now() + 60)
+    assert.equal(f.bot.checkAlerts().queued, 0)
+    const decision = JSON.parse(f.logs.at(-2).slice('check-alerts '.length))
+    assert.equal(decision.currentPriceUsd, current)
+    assert.equal(decision.differenceUsd, 6)
+    assert.equal(decision.notifyReason, 'below_threshold')
+    f.alert({
+      alertId: alert.id,
+      amountUsd: 6,
+      windowCount: 10,
+      windowUnit: 'minute'
+    })
+    assert.equal(f.bot.checkAlerts().queued, 1)
+    assert.match(f.messages[0].message, /fluctuated by \$6.00/)
+  }
+})
+
+test('cent-sized differences meet a cent-sized threshold', () => {
+  const f = fixture()
+  f.alert({amountUsd: 0.01})
+  f.observe(100.11)
+  f.observe(100.12, f.now() + 60)
+  assert.equal(f.bot.checkAlerts().queued, 1)
+  assert.match(f.messages[0].message, /fluctuated by \$0.01/)
+})
+
+test('alerts notify again at the interval boundary without a below-threshold reset', () => {
+  for (const [windowCount, windowUnit, seconds] of [
+    [10, 'minute', 600],
+    [1, 'hour', HOUR]
+  ]) {
+    const f = fixture()
+    f.alert({amountUsd: 1, windowCount, windowUnit})
+    f.observe(100)
+    f.observe(110, f.now() + 60)
+    assert.equal(f.bot.checkAlerts().queued, 1)
+    const notifiedAt = f.now()
+    f.observe(100, notifiedAt + seconds - 60)
+    assert.equal(f.bot.checkAlerts().queued, 0)
+    const decision = JSON.parse(f.logs.at(-2).slice('check-alerts '.length))
+    assert.equal(decision.checkDue, false)
+    assert.equal(decision.checkReason, 'notification_interval_not_elapsed')
+    assert.equal(decision.nextEligibleAt, notifiedAt + seconds)
+    assert.equal(decision.cooldownRemainingSeconds, 60)
+    f.observe(110, notifiedAt + seconds)
+    assert.equal(f.bot.checkAlerts().queued, 1)
+    assert.equal(f.messages.length, 2)
+  }
+})
+
+test('a below-threshold check after cooldown does not postpone the next evaluation', () => {
+  const f = fixture()
+  f.alert({amountUsd: 1, windowCount: 10, windowUnit: 'minute'})
+  f.observe(100)
+  f.observe(110, f.now() + 60)
+  assert.equal(f.bot.checkAlerts().queued, 1)
+  f.observe(110, f.now() + 600)
+  assert.equal(f.bot.checkAlerts().queued, 0)
+  f.observe(112, f.now() + 60)
+  assert.equal(f.bot.checkAlerts().queued, 1)
+})
+
+test('failed queues retry and cooldown begins only when a channel is queued', () => {
+  const f = fixture()
+  const alert = f.alert({amountUsd: 1, windowCount: 10, windowUnit: 'minute'})
+  f.observe(100)
+  f.observe(110, f.now() + 60)
+  f.failChannels(['email'])
+  assert.throws(() => f.bot.checkAlerts(), /Unsent channels/)
+  assert.equal(
+    JSON.parse(f.storage.get('state', `alert:${alert.id}`).value_json)
+      .lastNotifiedAt,
+    null
+  )
+  f.observe(100, f.now() + 60)
+  f.failChannels([])
+  assert.equal(f.bot.checkAlerts().queued, 1)
+  const notifiedAt = f.now()
+  f.observe(110, notifiedAt + 540)
+  assert.equal(f.bot.checkAlerts().queued, 0)
+  f.observe(100, notifiedAt + 600)
+  assert.equal(f.bot.checkAlerts().queued, 1)
+})
+
+test('partial retries retain the original event and extend cooldown from the last queued channel', () => {
+  const f = fixture()
+  f.alert({
+    amountUsd: 1,
+    windowCount: 10,
+    windowUnit: 'minute',
+    channels: ['email', 'telegram']
+  })
+  f.observe(100)
+  f.observe(110, f.now() + 60)
+  f.failChannels(['telegram'])
+  assert.throws(() => f.bot.checkAlerts(), /Unsent channels/)
+  const originalMessage = f.messages[0].message
+  f.observe(110, f.now() + 660)
+  f.failChannels([])
+  assert.equal(f.bot.checkAlerts().queued, 1)
+  assert.equal(f.messages[1].message, originalMessage)
+  const notifiedAt = f.now()
+  f.observe(100, notifiedAt + 540)
+  assert.equal(f.bot.checkAlerts().queued, 0)
+  f.observe(110, notifiedAt + 600)
+  assert.equal(f.bot.checkAlerts().queued, 2)
+})
+
+test('existing notification receipts observe the cooldown instead of waiting for rearm', () => {
+  for (const hasAttemptTime of [true, false]) {
+    const f = fixture()
+    const alert = f.alert({amountUsd: 1, windowCount: 10, windowUnit: 'minute'})
+    f.observe(100)
+    f.observe(110, f.now() + 60)
+    assert.equal(f.bot.checkAlerts().queued, 1)
+    const id = `alert:${alert.id}`
+    const previous = JSON.parse(f.storage.get('state', id).value_json)
+    delete previous.lastNotifiedAt
+    if (!hasAttemptTime) delete previous.attemptedAt
+    previous.triggered = true
+    f.storage.set('state', {id, value_json: JSON.stringify(previous)})
+    const notifiedAt = f.now()
+    f.observe(100, notifiedAt + 60)
+    assert.equal(f.bot.checkAlerts().queued, 0)
+    f.observe(110, notifiedAt + 600)
+    assert.equal(f.bot.checkAlerts().queued, 1)
+  }
 })

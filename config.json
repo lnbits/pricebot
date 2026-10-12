@@ -3,7 +3,7 @@
   "name": "Pricebot",
   "short_description": "Bitcoin price alerts and a daily summary, powered by LNbits.",
   "version": "0.1.0",
-  "min_lnbits_version": "1.5.6",
+  "min_lnbits_version": "1.6.2",
   "extension_type": "wasm",
   "tile": "/ext-assets/pricebot/icon.svg",
   "wasm": {
@@ -94,7 +94,25 @@
       }
     }
   ],
+  "schedules": [
+    {
+      "handler": "collect-prices",
+      "cron_expression": "* * * * *",
+      "timezone": "UTC"
+    }
+  ],
   "permissions": [
+    {
+      "id": "scheduler.extension",
+      "description": "Automatically collect one shared BTC/USD price every minute, starting when Pricebot is activated.",
+      "policies": [
+        {
+          "handler": "collect-prices",
+          "cron_expression": "* * * * *",
+          "timezone": "UTC"
+        }
+      ]
+    },
     {
       "id": "utils.basic",
       "description": "Read the BTC/USD price from core exchange rates."

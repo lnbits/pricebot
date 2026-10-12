@@ -4,15 +4,9 @@ A WASM LNbits extension with one BTC/USD price history for the entire instance,
 private user alerts, and optional daily summaries. Prices use LNbits' configured
 exchange-rate providers and cache, rounded to USD cents. No external price provider is needed.
 
-> Integration pending: this staged revision has its history, chart, alerts, and
-> compiled component ready for review. Automatic activation of the collector and
-> its storage-owner context require the separately proposed core support. The
-> manifest deliberately does not yet declare automatic schedules. Do not install
-> this draft until the collector integration is completed.
-
 ## Collection and history
 
-The intended collector runs once per minute for the instance, beginning on
+The collector runs once per minute for the instance, beginning on
 extension activation without a user visiting the UI. Ordinary users have no
 start/stop controls. Every user reads the same history; alert and notification
 settings remain private.
@@ -47,28 +41,37 @@ Create, edit, disable/enable, or delete up to 50 private alerts. Each includes:
   Alert months mean 30 days; stored monthly aggregates use calendar months.
 - One or more notification channels: email, Telegram, Nostr.
 
-An alert triggers when the highest minus lowest recorded price within its rolling
-window reaches the threshold. A rise followed by a return to the starting price
-still counts. Confirmed fluctuation can trigger as soon as observations establish
-it; collecting a complete window is not required. Missing observations are never
-invented, and checks skip when the newest price is more than two minutes old.
+An alert compares the latest fresh price with the recorded low and high within
+its rolling window: `max(abs(current - low), abs(current - high))`, rounded to USD
+cents. It triggers when that difference reaches the threshold and at least the
+configured interval has elapsed since its last successfully queued notification.
+A new alert can trigger immediately; collecting a complete window is not required.
+Missing observations are never invented, and checks skip when the newest price
+is more than two minutes old.
 
-A channel is notified once while the condition remains active. The alert rearms
-when the recorded fluctuation falls below the threshold. Changing the threshold,
-interval, channels, or enabled state starts a fresh rule evaluation; renaming
-alone does not send a duplicate. Successful channel receipts are kept if another
-channel fails, so the next check retries only unsent channels. Notification bursts
-are drained over successive minute checks (up to 15 channel attempts per check)
-to respect WASM limits. Pending channels retain the original event and timestamp
-even if its window clears before delivery.
+The interval is both the lookback window and the notification cooldown. For a
+10-minute alert, a notification queued at 12:00 allows the next evaluation at
+12:10. If the threshold is not met then, checks continue every minute until it is;
+an unsuccessful check does not restart the cooldown. There is no requirement for
+the difference to drop below the threshold between notifications.
+
+Changing the threshold, interval, channels, or enabled state starts a fresh rule
+evaluation; renaming alone does not send a duplicate. Successful channel receipts
+are kept if another channel fails, so the next check retries only unsent channels
+for the original event, even during the cooldown. Each successful queue operation
+updates the cooldown timestamp; a failed attempt does not. Older receipts without
+that timestamp use their last recorded attempt time, or their event time if no
+attempt time was saved, for the initial cooldown. Notification bursts are drained
+over successive minute checks (up to 15 channel attempts per check) to respect
+WASM limits. Pending channels retain the original event and timestamp even if its
+window clears before delivery.
 
 Windows up to one day use minute observations; up to seven days use hourly
-extrema, up to 366 days use daily extrema, and longer windows use monthly extrema. An older aggregate straddling the start of a window
-cannot reveal every interior price after its finer history expires. To avoid a
-false notification from an expired peak, only its timestamped open/close/extrema
-inside the window count toward triggering. Rearming waits until even the entire
-intersecting aggregate is below the threshold. This can delay triggering or
-rearming for a partial older bucket.
+extrema, up to 366 days use daily extrema, and longer windows use monthly extrema.
+An older aggregate straddling the start of a window cannot reveal every interior
+price after its finer history expires. To avoid a false notification from an
+expired peak, only its timestamped open/close/extrema inside the window count
+toward triggering. This can delay triggering for a partial older bucket.
 
 Configure notification destinations in the user's LNbits account. Pricebot uses
 the saved settings for each selected channel. A queued message does not guarantee
@@ -99,10 +102,11 @@ extension owner. Users read only `history` through `storage.get_public` and
 alerts and notification state are not public. No deprecated shared-storage import
 or invented shared-storage permission is used.
 
-The pending host integration must start the approved instance schedule on
-activation/startup and supply the collector's extension storage owner. The
-existing administrator-owned alternative would require a one-time manual setup
-and would tie collection to that account.
+LNbits creates the approved `collect-prices` instance schedule on activation
+and restores it on server startup. The first observation is collected at the
+next minute boundary. Restarts reuse the same job without postponing it or
+overriding an administrator's pause. The collector uses an extension storage
+owner and does not depend on any user's account or browser session.
 
 ## Development
 
@@ -120,5 +124,6 @@ the WIT contract. Browser files use Vue render functions and native SVG, without
 runtime template compilation or an additional chart dependency.
 
 Install through LNbits' installation flow to apply the fresh schema and approve
-the manifest permissions once the collector integration is completed. A symlink
+the manifest permissions, including `scheduler.extension`. This requires LNbits
+with automatic WASM schedules and extension-owned schedule storage. A symlink
 alone does not install storage migrations, approve permissions, or start jobs.

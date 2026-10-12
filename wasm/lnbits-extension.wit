@@ -18,6 +18,8 @@ interface host {
   record random-id-request { prefix: string }
   record random-id-response { id: string }
   record now-response { timestamp: u64 }
+  record log-request { level: string, message: string }
+  record log-response { ok: bool }
   record notification-request { %type: string, message: string }
   record notification-response { queued: bool }
   storage-get: func(request: storage-get-request) -> storage-get-response;
@@ -28,6 +30,7 @@ interface host {
   storage-delete: func(request: storage-get-request) -> storage-delete-response;
   random-id: func(request: random-id-request) -> random-id-response;
   now: func() -> now-response;
+  log: func(request: log-request) -> log-response;
   notifications-send-user-notification: func(request: notification-request) -> notification-response;
 }
 

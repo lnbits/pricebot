@@ -40,8 +40,23 @@ export function createPricebot({
     return {...fields, channels: JSON.parse(channels_json)}
   }
   const money = value => `$${value.toFixed(2)}`
+  const fluctuation = (price, low, high) =>
+    Math.round(Math.max(Math.abs(price - low), Math.abs(price - high)) * 100) /
+    100
   const fresh = (latest, now) =>
     latest && latest[0] <= now && now - latest[0] <= 2 * MINUTE
+  function logCheck(details) {
+    system.log(`check-alerts ${JSON.stringify(details)}`)
+  }
+  function logAlert(alert, details) {
+    logCheck({
+      alertId: alert.id,
+      windowCount: alert.window_count,
+      windowUnit: alert.window_unit,
+      thresholdUsd: alert.amount_usd,
+      ...details
+    })
+  }
   function readState(id) {
     const row = storage.get('state', id)
     return row ? JSON.parse(row.value_json) : {}
@@ -180,15 +195,50 @@ export function createPricebot({
       return history.collect(price, Math.floor(system.now() / MINUTE) * MINUTE)
     },
     checkAlerts() {
-      const active = alerts().filter(alert => alert.enabled)
-      if (!active.length) return {queued: 0}
+      logCheck({phase: 'invoked'})
+      const configured = alerts(),
+        active = configured.filter(alert => alert.enabled)
+      for (const alert of configured.filter(alert => !alert.enabled))
+        logAlert(alert, {
+          checkDue: false,
+          checkReason: 'alert_disabled',
+          notify: false,
+          notifyReason: 'alert_disabled'
+        })
+      if (!active.length) {
+        logCheck({
+          phase: 'completed',
+          checkDue: false,
+          checkReason: 'no_enabled_alerts',
+          notify: false,
+          queued: 0
+        })
+        return {queued: 0}
+      }
       const now = system.now()
       const data = history.load(
         now,
         active.map(alert => alert.window_count * UNITS[alert.window_unit])
       )
       const latest = data.latest
-      if (!fresh(latest, now)) return {queued: 0, waitingForHistory: true}
+      if (!fresh(latest, now)) {
+        const reason = !latest
+          ? 'missing_price_history'
+          : latest[0] > now
+            ? 'latest_price_is_in_the_future'
+            : 'latest_price_older_than_two_minutes'
+        for (const alert of active)
+          logAlert(alert, {
+            checkDue: false,
+            checkReason: reason,
+            observedAt: latest?.[0] ?? null,
+            priceAgeSeconds: latest ? now - latest[0] : null,
+            notify: false,
+            notifyReason: reason
+          })
+        logCheck({phase: 'completed', queued: 0, waitingForHistory: true})
+        return {queued: 0, waitingForHistory: true}
+      }
       // One read for all receipts keeps 50 alerts within the host storage-call budget.
       const states = new Map(
         storage
@@ -211,54 +261,127 @@ export function createPricebot({
       )
       for (const alert of active) {
         const seconds = alert.window_count * UNITS[alert.window_unit]
-        const range = ranges.get(seconds)
-        if (!range) continue
         const id = `alert:${alert.id}`
         const rule = `${alert.amount_usd}:${alert.window_count}:${alert.window_unit}:${alert.channels_json}`
         const previous = states.get(id),
           channels = channelsOf(alert)
-        const wasTriggered = previous?.rule === rule && previous.triggered
         const state =
           previous?.rule === rule
             ? previous
             : {rule, triggered: false, sent: []}
         const waiting = state.triggered && state.sent.length < channels.length
-        if (!waiting && range.upperVariation < alert.amount_usd) {
-          if (state.triggered || state.sent.length)
-            writeState(id, {rule, triggered: false, sent: []})
+        // Older receipts have no queue timestamp; retain their last known attempt.
+        const lastNotifiedAt =
+          state.lastNotifiedAt ??
+          (state.sent.length
+            ? (state.attemptedAt ?? state.event?.[0])
+            : null) ??
+          null
+        const nextEligibleAt =
+          lastNotifiedAt === null ? null : lastNotifiedAt + seconds
+        const due = nextEligibleAt === null || now >= nextEligibleAt
+        const range = ranges.get(seconds)
+        const difference = range
+          ? fluctuation(latest[1], range.low, range.high)
+          : null
+        const logDecision = (notify, notifyReason, details = {}) =>
+          logAlert(alert, {
+            checkDue: waiting || due,
+            checkReason: waiting
+              ? 'pending_channel_retry'
+              : !due
+                ? 'notification_interval_not_elapsed'
+                : lastNotifiedAt === null
+                  ? 'never_notified'
+                  : 'notification_interval_elapsed',
+            lastNotifiedAt,
+            nextEligibleAt,
+            cooldownRemainingSeconds: Math.max(
+              0,
+              (nextEligibleAt ?? now) - now
+            ),
+            windowStart: now - seconds,
+            windowEnd: now,
+            currentPriceUsd: latest[1],
+            observedAt: latest[0],
+            lowUsd: range?.low ?? null,
+            highUsd: range?.high ?? null,
+            differenceUsd: difference,
+            notify,
+            notifyReason,
+            ...details
+          })
+        if (!waiting && !due) {
+          logDecision(false, 'notification_interval_not_elapsed')
           continue
         }
-        if (range.variation < alert.amount_usd && !state.triggered) continue
-        if (!state.triggered) {
+        if (!waiting && !range) {
+          logDecision(false, 'no_prices_in_window')
+          continue
+        }
+        if (!waiting && difference < alert.amount_usd) {
+          logDecision(false, 'below_threshold')
+          continue
+        }
+        if (!waiting) {
           state.triggered = true
+          state.sent = []
           state.event = [now, range.low, range.high, latest[1]]
         }
+        const unsent = channels.filter(channel => !state.sent.includes(channel))
+        logDecision(
+          remaining > 0,
+          !remaining
+            ? 'notification_attempt_limit_reached'
+            : waiting
+              ? 'retry_pending_channels'
+              : 'threshold_reached',
+          {
+            remainingAttempts: remaining,
+            sentChannels: state.sent,
+            pendingChannels: unsent,
+            eventAt: state.event[0],
+            eventLowUsd: state.event[1],
+            eventHighUsd: state.event[2],
+            eventPriceUsd: state.event[3],
+            eventDifferenceUsd: fluctuation(
+              state.event[3],
+              state.event[1],
+              state.event[2]
+            )
+          }
+        )
         let message = ''
-        if (remaining && state.sent.length < channels.length) {
+        if (remaining) {
           const [time, low, high, price] = state.event
           const interval = `${alert.window_count} ${alert.window_unit}${alert.window_count === 1 ? '' : 's'}`
           message =
-            `Pricebot · ${alert.name}: BTC fluctuated by ${money(high - low)} within the last ${interval}. ` +
+            `Pricebot · ${alert.name}: BTC fluctuated by ${money(fluctuation(price, low, high))} within the last ${interval}. ` +
             `Low: ${money(low)}; high: ${money(high)}. Current price: ${money(price)} USD. ` +
             `Observed at ${new Date(time * 1000).toISOString()}.`
         }
         const result = sendMissing(channels, state, message, remaining)
+        state.lastNotifiedAt = result.queued ? now : lastNotifiedAt
+        if (result.attempts)
+          logAlert(alert, {
+            phase: 'notification_result',
+            ...result,
+            lastNotifiedAt: state.lastNotifiedAt,
+            sentChannels: state.sent,
+            pendingChannels: channels.filter(
+              channel => !state.sent.includes(channel)
+            )
+          })
         remaining -= result.attempts
         if (result.attempts) state.attemptedAt = now
         pending += channels.length - state.sent.length
         queued += result.queued
         failed ||= result.failed
-        // Keep successful channel receipts even if another channel failed.
-        if (
-          waiting &&
-          state.sent.length === channels.length &&
-          range.upperVariation < alert.amount_usd
-        ) {
-          state.triggered = false
-          state.sent = []
-        }
-        if (result.attempts || !wasTriggered) writeState(id, state)
+        // Keep the event and successful receipts while unsent channels retry.
+        state.triggered = state.sent.length < channels.length
+        if (result.attempts || !waiting) writeState(id, state)
       }
+      logCheck({phase: 'completed', queued, pending, failed})
       if (failed)
         throw new Error(
           'Some notifications could not be queued. Unsent channels will be retried on the next check.'

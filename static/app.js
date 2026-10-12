@@ -155,7 +155,7 @@ const app = Vue.createApp({
               ])
             ),
             muted(
-              'An alert compares the highest and lowest recorded prices within its window. Each selected channel is notified once; the alert rearms below your threshold.',
+              'An alert compares the current price with the low and high in its window, using the larger difference. After a notification, the same interval must pass before another alert can trigger.',
               'text-caption q-mt-lg q-mb-none'
             )
           ])
