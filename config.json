@@ -5,7 +5,7 @@
   "version": "0.1.2",
   "min_lnbits_version": "1.6.2",
   "extension_type": "wasm",
-  "tile": "/ext-assets/pricebot/icon.svg",
+  "tile": "/ext-assets/pricebot/assets/icon.png",
   "wasm": {
     "module": "wasm/module.wasm",
     "exports": [
