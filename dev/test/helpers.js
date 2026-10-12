@@ -88,7 +88,14 @@ export function fixture({tables = new Map(), owner = 'alice'} = {}) {
         if (job.scope !== 'user')
           throw new Error('Users must not control shared jobs')
         saves++
-        const value = {...job, id: `${owner}:${job.handler}`}
+        const value = {
+          id: job.id || `${owner}:${job.handler}`,
+          handler: job.handler,
+          cron_expression: job.cronExpression,
+          timezone: job.timezone,
+          enabled: job.enabled,
+          payload_json: job.payloadJson
+        }
         jobs.set(job.handler, clone(value))
         return value
       }

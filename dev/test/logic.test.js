@@ -22,12 +22,39 @@ test('saving alerts needs no preferences and never creates a user collector', ()
   f.alert()
   f.alert({name: 'Another'})
   assert.deepEqual([...f.jobs.keys()], ['check-alerts'])
+  assert.equal(f.jobs.get('check-alerts').cron_expression, '*/10 * * * *')
   assert.equal(f.saves(), 1)
   f.bot.savePreferences({channels: ['nostr'], dailySummary: true})
   assert.equal(f.jobs.size, 2)
   assert.equal(f.jobs.get('daily-summary').enabled, true)
+  assert.equal(f.jobs.get('daily-summary').cron_expression, '0 9 * * *')
   f.bot.savePreferences({channels: ['email'], dailySummary: false})
   assert.equal(f.jobs.get('daily-summary').enabled, false)
+})
+
+test('saving an alert updates its existing minute job without duplicating or repeatedly rescheduling it', () => {
+  const f = fixture()
+  f.jobs.set('check-alerts', {
+    id: 'existing-alert-job',
+    handler: 'check-alerts',
+    cron_expression: '* * * * *',
+    timezone: 'UTC',
+    enabled: true,
+    payload_json: '{}'
+  })
+  const alert = f.alert()
+  const job = f.jobs.get('check-alerts')
+  assert.equal(job.id, 'existing-alert-job')
+  assert.equal(job.cron_expression, '*/10 * * * *')
+  assert.equal(job.timezone, 'UTC')
+  assert.equal(job.enabled, true)
+  assert.equal(f.jobs.size, 1)
+  assert.equal(f.saves(), 1)
+
+  job.next_run_at = f.now() + 600
+  f.alert({alertId: alert.id, name: 'Renamed'})
+  assert.equal(f.saves(), 1)
+  assert.equal(f.jobs.get('check-alerts').next_run_at, job.next_run_at)
 })
 
 test('price returning to its starting value still triggers a within-window fluctuation', () => {

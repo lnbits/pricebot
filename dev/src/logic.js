@@ -3,7 +3,7 @@ import {createHistory, windowRanges, MINUTE, DAY, UNITS} from './history.js'
 const MAX_ALERTS = 50
 const MAX_NOTIFICATION_ATTEMPTS = 15
 const CHANNELS = ['email', 'telegram', 'nostr']
-const JOBS = {'check-alerts': '* * * * *', 'daily-summary': '0 9 * * *'}
+const JOBS = {'check-alerts': '*/10 * * * *', 'daily-summary': '0 9 * * *'}
 
 export function createPricebot({
   storage,
@@ -17,7 +17,13 @@ export function createPricebot({
 
   function ensureJob(handler, enabled = true) {
     const existing = scheduler.list('user').find(job => job.handler === handler)
-    if (existing && existing.enabled === enabled) return existing
+    if (
+      existing &&
+      existing.enabled === enabled &&
+      existing.cron_expression === JOBS[handler] &&
+      existing.timezone === 'UTC'
+    )
+      return existing
     return scheduler.set({
       scope: 'user',
       handler,

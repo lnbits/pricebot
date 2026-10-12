@@ -131,11 +131,11 @@
     },
     {
       "id": "scheduler.user",
-      "description": "Check your alerts every minute and optionally send your daily summary at 09:00 UTC.",
+      "description": "Check your alerts every 10 minutes and optionally send your daily summary at 09:00 UTC.",
       "policies": [
         {
           "handler": "check-alerts",
-          "cron_expression": "* * * * *",
+          "cron_expression": "*/10 * * * *",
           "timezone": "UTC"
         },
         {

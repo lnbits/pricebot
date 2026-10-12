@@ -45,13 +45,13 @@ An alert compares the latest fresh price with the recorded low and high within
 its rolling window: `max(abs(current - low), abs(current - high))`, rounded to USD
 cents. It triggers when that difference reaches the threshold and at least the
 configured interval has elapsed since its last successfully queued notification.
-A new alert can trigger immediately; collecting a complete window is not required.
+A new alert can trigger on its first check; a complete window is not required.
 Missing observations are never invented, and checks skip when the newest price
 is more than two minutes old.
 
 The interval is both the lookback window and the notification cooldown. For a
 10-minute alert, a notification queued at 12:00 allows the next evaluation at
-12:10. If the threshold is not met then, checks continue every minute until it is;
+12:10. If the threshold is not met, checks continue every 10 minutes until it is;
 an unsuccessful check does not restart the cooldown. There is no requirement for
 the difference to drop below the threshold between notifications.
 
@@ -62,9 +62,9 @@ for the original event, even during the cooldown. Each successful queue operatio
 updates the cooldown timestamp; a failed attempt does not. Older receipts without
 that timestamp use their last recorded attempt time, or their event time if no
 attempt time was saved, for the initial cooldown. Notification bursts are drained
-over successive minute checks (up to 15 channel attempts per check) to respect
-WASM limits. Pending channels retain the original event and timestamp even if its
-window clears before delivery.
+over successive checks every 10 minutes (up to 15 channel attempts per check).
+This respects WASM limits. Pending channels retain the original event and timestamp
+even if its window clears before delivery.
 
 Windows up to one day use minute observations; up to seven days use hourly
 extrema, up to 366 days use daily extrema, and longer windows use monthly extrema.
@@ -80,12 +80,16 @@ repeat; the host does not offer an atomic notification-and-storage transaction.
 
 ## User jobs and daily summary
 
-Saving an alert creates or resumes the user's `check-alerts` job (`* * * * *`, UTC).
+Saving an alert creates or updates the user's `check-alerts` job
+(`*/10 * * * *`, UTC), at minutes 00, 10, 20, 30, 40, and 50 of each hour.
 Saving summary preferences creates or updates `daily-summary` (`0 9 * * *`, UTC).
 Existing matching jobs are reused without postponing their next run. These user
 jobs never collect prices. The optional summary includes the current price and
 24-hour change, requires a full-day baseline, and queues once per selected
 channel per UTC day during normal operation.
+
+After upgrading, approve the updated `scheduler.user` policy, then save an
+existing alert once to update its old one-minute job to the new cadence.
 
 Disabling the extension for a user stops that user's jobs through the host's
 access checks. The instance collector belongs to the extension, independent of
