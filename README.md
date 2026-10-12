@@ -127,3 +127,19 @@ Install through LNbits' installation flow to apply the fresh schema and approve
 the manifest permissions, including `scheduler.extension`. This requires LNbits
 with automatic WASM schedules and extension-owned schedule storage. A symlink
 alone does not install storage migrations, approve permissions, or start jobs.
+
+## GitHub Actions
+
+CI runs `make check` and `make build` with Node.js 22 on branch pushes and pull
+requests. No npm install step is needed; the build uses the pinned JCO command.
+
+To release, update `config.json`'s version, run `make check` and `make build`, and
+commit the rebuilt `wasm/module.wasm` before pushing a matching `vX.Y.Z` tag.
+The release workflow validates the committed metadata and WASM, reruns the checks
+and build, creates a GitHub release, and opens a pull request against
+`lnbits/lnbits-extensions-wasm`. The registry installs the tagged source archive,
+so the rebuilt WASM must be committed before tagging.
+
+Configure the `EXT_GITHUB` Actions secret with access to push branches and open
+pull requests in `lnbits/lnbits-extensions-wasm`. The release itself uses the
+automatic `GITHUB_TOKEN` with `contents: write` permission.

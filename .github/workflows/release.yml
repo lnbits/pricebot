@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Create release
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate committed WASM metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          config = json.loads(Path("config.json").read_text())
+          tag = os.environ["RELEASE_TAG"]
+          version = tag[1:] if tag.startswith("v") else tag
+
+          assert config.get("id") == "pricebot", "config id must be pricebot"
+          assert config.get("version") == version, "config version must match tag"
+          assert config.get("extension_type") == "wasm", "extension_type must be wasm"
+
+          module = config.get("wasm", {}).get("module")
+          assert module, "wasm.module is required"
+          with open(module, "rb") as module_file:
+              assert module_file.read(4) == b"\0asm", "wasm.module is not WASM"
+          PY
+
+      - name: Check and build WASM
+        run: |
+          make check
+          make build
+
+      - name: Validate generated WASM
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          module = Path("wasm/module.wasm")
+          assert module.is_file(), "wasm.module file is missing"
+          with module.open("rb") as module_file:
+              assert module_file.read(4) == b"\0asm", "wasm.module is not WASM"
+          PY
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
+          repo_name: ${{ github.event.repository.name }}
+        run: |
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes "https://github.com/lnbits/$repo_name/releases/tag/$tag"
+
+  pullrequest:
+    name: Update WASM extension registry
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - name: Checkout WASM extension registry
+        uses: actions/checkout@v4
+        with:
+          repository: lnbits/lnbits-extensions-wasm
+          token: ${{ secrets.EXT_GITHUB }}
+
+      - name: Update extensions.json
+        env:
+          GH_TOKEN: ${{ secrets.EXT_GITHUB }}
+          repo_name: ${{ github.event.repository.name }}
+          tag: ${{ github.ref_name }}
+          branch: update-${{ github.event.repository.name }}-${{ github.ref_name }}
+          title: '[UPDATE] ${{ github.event.repository.name }} to ${{ github.ref_name }}'
+        run: |
+          set -e
+          git config --global user.name "alan"
+          git config --global user.email "alan@lnbits.com"
+          git checkout -b "$branch"
+          git pull origin "$branch" || echo "Creating $branch"
+          sh util.sh update_extension "$repo_name" "$tag"
+          git add extensions.json
+          if git diff --cached --quiet; then
+            echo "No registry changes"
+            exit 0
+          fi
+          git commit -m "$title"
+          git push origin "$branch"
+          check=$(gh pr list --repo lnbits/lnbits-extensions-wasm -H "$branch" --json number --jq 'length')
+          if [ "$check" = "0" ]; then
+            gh pr create --repo lnbits/lnbits-extensions-wasm \
+              --title "$title" \
+              --body "Automated WASM extension registry update for $repo_name $tag." \
+              --head "$branch" \
+              --base main
+          fi
