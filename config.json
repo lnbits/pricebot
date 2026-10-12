@@ -2,7 +2,7 @@
   "id": "pricebot",
   "name": "Pricebot",
   "short_description": "Bitcoin price alerts and a daily summary, powered by LNbits.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "min_lnbits_version": "1.6.2",
   "extension_type": "wasm",
   "tile": "/ext-assets/pricebot/icon.svg",
