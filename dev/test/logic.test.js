@@ -362,3 +362,17 @@ test('existing notification receipts observe the cooldown instead of waiting for
     assert.equal(f.bot.checkAlerts().queued, 1)
   }
 })
+
+test('a host trap after one channel queues preserves its receipt across guest instances', () => {
+  let interrupted = true
+  const f = fixture({beforeSend(channel) {
+    if (channel === 'telegram' && interrupted) throw new Error('queue interrupted')
+  }})
+  f.alert({amountUsd: 1, channels: ['email', 'telegram']})
+  f.observe(100)
+  f.observe(110, f.now() + 60)
+  assert.throws(() => f.bot.checkAlerts(), /queue interrupted/)
+  interrupted = false
+  assert.equal(f.bot.checkAlerts().queued, 1)
+  assert.deepEqual(f.messages.map(m => m.channel), ['email', 'telegram'])
+})

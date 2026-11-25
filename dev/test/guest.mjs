@@ -27,8 +27,7 @@ export function createPricebot({storage, publicStorage, system, notifications, s
       storageSet({table, dataJson}) {storage.set(table, JSON.parse(dataJson)); return {ok: true}},
       storageDelete({table, id}) {storage.delete(table, id); return {ok: true}},
       notificationsSendUserNotification({type, message}) {
-        try {return notifications.send(type, message)}
-        catch {return {queued: false}}
+        return notifications.send(type, message)
       }
     },
     'lnbits:extension/scheduler': {

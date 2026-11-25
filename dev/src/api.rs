@@ -145,12 +145,15 @@ pub fn daily_summary(_: &Value) -> Reply {
     let price = num(&latest[1]);
     let change = price - num(&prior[1]);
     let percent = change / num(&prior[1]) * 100.;
-    let message=format!("Pricebot daily summary: BTC \u{24}{price:.2} USD. 24-hour change: {}\u{24}{:.2} ({percent:+.2}%).",if change>=0.{"+"}else{"-"},change.abs());
+    let message = format!(
+        "Pricebot daily summary: BTC ${price:.2} USD. 24-hour change: {}${:.2} ({percent:+.2}%).",
+        if change >= 0. { "+" } else { "-" },
+        change.abs()
+    );
     let channels = parsed(&prefs["channels_json"])?;
-    let count = send(&channels, &mut state, &message, usize::MAX)?;
-    if count.queued > 0 {
-        write_state(&id, &state)?;
-    }
+    let count = send(&channels, &mut state, &message, usize::MAX, |receipt| {
+        write_state(&id, receipt)
+    })?;
     if count.failed {
         return Err("Some daily summary notifications could not be queued.".into());
     }
@@ -287,8 +290,15 @@ pub fn check_alerts(_: &Value) -> Reply {
         let unit = s(&alert["window_unit"]);
         let plural = if count_units == 1 { "" } else { "s" };
         let name = s(&alert["name"]);
-        let message=format!("Pricebot · {name}: BTC fluctuated by \u{24}{diff:.2} within the last {count_units} {unit}{plural}. Low: \u{24}{lo:.2}; high: \u{24}{hi:.2}. Current price: \u{24}{price:.2} USD. Observed at {}.",history::iso(t));
-        let delivery = send(&channels, &mut state, &message, remaining)?;
+        let message=format!("Pricebot · {name}: BTC fluctuated by ${diff:.2} within the last {count_units} {unit}{plural}. Low: ${lo:.2}; high: ${hi:.2}. Current price: ${price:.2} USD. Observed at {}.",history::iso(t));
+        if remaining > 0 {
+            state["attemptedAt"] = json!(now);
+            write_state(&id, &state)?;
+        }
+        let delivery = send(&channels, &mut state, &message, remaining, |receipt| {
+            receipt["lastNotifiedAt"] = json!(now);
+            write_state(&id, receipt)
+        })?;
         let missed = unsent(&channels, &state);
         state["lastNotifiedAt"] = json!(if delivery.queued > 0 { Some(now) } else { last });
         if delivery.attempts > 0 {
@@ -430,6 +440,7 @@ fn send(
     state: &mut Value,
     message: &str,
     limit: usize,
+    checkpoint: impl Fn(&mut Value) -> Result<(), String>,
 ) -> Result<Delivery, String> {
     let mut result = Delivery {
         attempts: 0,
@@ -447,6 +458,8 @@ fn send(
                 .as_array_mut()
                 .ok_or("Invalid notification receipt.")?
                 .push(channel.clone());
+            // A later host call can trap. Keep each successful channel's receipt.
+            checkpoint(state)?;
             result.queued += 1;
         } else {
             result.failed = true;
