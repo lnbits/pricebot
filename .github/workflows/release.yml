@@ -44,6 +44,8 @@ jobs:
               assert module_file.read(4) == b"\0asm", "wasm.module is not WASM"
           PY
 
+      - run: rustup target add wasm32-wasip2
+
       - name: Check and build WASM
         run: |
           make check

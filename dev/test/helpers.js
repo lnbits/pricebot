@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto'
-import {createPricebot} from '../src/logic.js'
+import {createPricebot} from './guest.mjs'
 
 const clone = value => (value == null ? value : structuredClone(value))
 export function memoryStore(tables = new Map(), owner = 'extension:pricebot') {

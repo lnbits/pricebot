@@ -1,6 +1,6 @@
 .PHONY: check build
 
-check:
+check: build
 	cd dev && npm run check
 
 build:

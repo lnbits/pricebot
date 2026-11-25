@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {fixture} from './helpers.js'
-import {DAY, HOUR} from '../src/history.js'
+import {DAY, HOUR} from './guest.mjs'
 
 test('users immediately see the same collected history while alerts remain private', () => {
   const tables = new Map(),
