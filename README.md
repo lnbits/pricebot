@@ -114,7 +114,7 @@ owner and does not depend on any user's account or browser session.
 
 ## Development
 
-Use Node.js 22 or newer and the existing pinned `@bytecodealliance/jco` toolchain.
+Use Node.js 22 or newer and Rust. Install the component target with `rustup target add wasm32-wasip2`.
 
 ```sh
 make check
@@ -135,7 +135,7 @@ alone does not install storage migrations, approve permissions, or start jobs.
 ## GitHub Actions
 
 CI runs `make check` and `make build` with Node.js 22 on branch pushes and pull
-requests. No npm install step is needed; the build uses the pinned JCO command.
+requests. No npm install step is needed; the component tests load the compiled Rust guest using the pinned jco command.
 
 To release, update `config.json`'s version, run `make check` and `make build`, and
 commit the rebuilt `wasm/module.wasm` before pushing a matching `vX.Y.Z` tag.

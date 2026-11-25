@@ -1,7 +1,7 @@
 import preparePricebotChart from '../../static/chart-data.js'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {createHistory, windowRange, DAY, HOUR} from '../src/history.js'
+import {createHistory, DAY, HOUR} from './guest.mjs'
 import {memoryStore, fixture} from './helpers.js'
 
 function historyFixture() {
@@ -164,43 +164,30 @@ test('charts select retained resolutions, preserve extrema, and return empty ran
 })
 
 test('older hourly/daily/monthly extrema remain usable after minute samples expire', () => {
-  const {history} = historyFixture(),
-    now = Date.UTC(2026, 0, 3) / 1000
-  history.collect(70000, now - 400 * DAY)
-  history.collect(80000, now - 20 * DAY)
-  history.collect(120000, now - 2 * DAY)
-  history.collect(100000, now)
-  assert.equal(
-    windowRange(history.load(now, 3 * DAY), now, 3 * DAY).variation,
-    20000
-  )
-  assert.equal(
-    windowRange(history.load(now, 30 * DAY), now, 30 * DAY).variation,
-    40000
-  )
-  assert.equal(
-    windowRange(history.load(now, 500 * DAY), now, 500 * DAY).variation,
-    50000
-  )
+  const f = fixture(), now = Date.UTC(2026, 0, 3) / 1000
+  f.observe(70000, now - 400 * DAY)
+  f.observe(80000, now - 20 * DAY)
+  f.observe(120000, now - 2 * DAY)
+  f.observe(100000, now)
+  for (const [days, expected] of [[3, 20000], [30, 40000], [500, 50000]]) {
+    const alert = f.alert({windowCount: days, windowUnit: 'day', amountUsd: 1000000})
+    f.bot.checkAlerts()
+    const {highUsd, lowUsd} = JSON.parse(f.logs.at(-2).slice('check-alerts '.length))
+    assert.equal(highUsd - lowUsd, expected)
+    f.bot.deleteAlert({alertId: alert.id})
+  }
 })
 
 test('an expired high in a partial old bucket cannot produce a false alert', () => {
-  const {history} = historyFixture(),
-    now = Date.UTC(2026, 0, 3) / 1000
-  history.collect(150000, now - 2 * DAY)
-  history.collect(100000, now - 2 * DAY + 1800)
-  history.collect(100000, now)
-  const range = windowRange(
-    history.load(now, 2 * DAY - 600),
-    now,
-    2 * DAY - 600
-  )
-  assert.equal(range.variation, 0)
-  assert.equal(
-    range.upperVariation,
-    50000,
-    'do not rearm using incomplete older-bucket evidence'
-  )
+  const f = fixture(), now = Date.UTC(2026, 0, 3) / 1000
+  f.observe(150000, now - 2 * DAY)
+  f.observe(100000, now - 2 * DAY + 1800)
+  f.observe(100000, now)
+  f.alert({windowCount: (2 * DAY - 600) / 60, windowUnit: 'minute', amountUsd: 1})
+  assert.equal(f.bot.checkAlerts().queued, 0)
+  const decision = JSON.parse(f.logs.at(-2).slice('check-alerts '.length))
+  assert.equal(decision.differenceUsd, 0)
+  assert.equal(preparePricebotChart(f.bot.getHistory({range: '1W'})).high, 150000)
 })
 
 test('journal recovery preserves a sample when the next run crosses a UTC year boundary', () => {
